@@ -1,11 +1,8 @@
-.DS_Store
-Thumbs.db
-
+# Build artifacts
 build/
 dist/
 out/
-release/.local-test/
-
+release/
 *.o
 *.a
 *.so
@@ -13,4 +10,31 @@ release/.local-test/
 *.log
 *.tmp
 
+# Pak binary and runtime libs (built, not committed)
 ports/tg5040/pak/bin/nextfeed
+ports/tg5040/pak/lib/
+
+# Third-party build artifacts (curl/openssl)
+third_party/apostrophe/build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Local test data
+.local-test/

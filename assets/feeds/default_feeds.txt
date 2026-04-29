@@ -1,7 +1,8 @@
 # NextFeed — Default Feeds
 # Format: Label|URL (one per line)
-# Lines starting with # are comments
 
+Retro Handhelds|https://retrohandhelds.gg/feed/
+Retro Game Corps|https://retrogamecorps.com/feed/
 Hacker News|https://news.ycombinator.com/rss
 Ars Technica|https://feeds.arstechnica.com/arstechnica/index
 Lobsters|https://lobste.rs/rss

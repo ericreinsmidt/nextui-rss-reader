@@ -34,6 +34,12 @@ if [ -f "${DEFAULT_FEEDS_SRC}" ] && [ ! -f "${DEFAULT_FEEDS_DST}" ]; then
   echo "Seeded default feeds to ${DEFAULT_FEEDS_DST}" >> "${LOG_FILE}" 2>&1
 fi
 
+# CA certificate bundle for HTTPS (bundled with pak)
+if [ -f "${PAK_DIR}/lib/cacert.pem" ]; then
+  export CURL_CA_BUNDLE="${PAK_DIR}/lib/cacert.pem"
+  echo "CURL_CA_BUNDLE=${CURL_CA_BUNDLE}" >> "${LOG_FILE}" 2>&1
+fi
+
 if [ -x "${BIN}" ]; then
   export NEXTFEED_STATE_DIR="${STATE_DIR}"
   export NEXTFEED_CACHE_DIR="${CACHE_DIR}"
