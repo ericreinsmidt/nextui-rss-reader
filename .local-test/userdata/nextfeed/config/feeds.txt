@@ -1,3 +1,0 @@
-https://hnrss.org/frontpage
-https://planet.gnome.org/rss20.xml
-https://lwn.net/headlines/rss

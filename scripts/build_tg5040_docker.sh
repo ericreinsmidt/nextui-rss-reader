@@ -1,11 +1,17 @@
-#!/bin/sh
+#!/bin/bash
+# Build NextFeed for tg5040 inside the toolchain Docker container.
+set -e
 
-set -eu
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD_DIR="${REPO_DIR}/build/tg5040"
 
-ROOT_DIR="/Users/htpc/Projects/nextui-rss-reader"
+mkdir -p "${BUILD_DIR}"
 
 docker run --rm \
-  -v "${ROOT_DIR}:/workspace" \
-  -w /workspace/ports/tg5040 \
-  ghcr.io/loveretro/tg5040-toolchain \
-  make
+    -v "${REPO_DIR}":/workspace \
+    ghcr.io/loveretro/tg5040-toolchain \
+    make -C /workspace -f ports/tg5040/Makefile \
+        BUILD_DIR=/workspace/build/tg5040
+
+echo ""
+echo "Build complete: ${BUILD_DIR}/nextfeed"

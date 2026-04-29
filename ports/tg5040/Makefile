@@ -1,42 +1,36 @@
-# tg5040 Makefile for NextFeed
+# NextFeed — tg5040 cross-compile Makefile
+# Called inside Docker container via build script.
 
-.PHONY: all sync-assets build clean
+CROSS_COMPILE ?= aarch64-nextui-linux-gnu-
+CC      := $(CROSS_COMPILE)gcc
+SYSROOT := /opt/aarch64-nextui-linux-gnu/aarch64-nextui-linux-gnu/libc/usr
+PLATFORM_ID := tg5040
 
-ROOT_DIR := ../..
-PAK_DIR := pak
-BIN_DIR := $(PAK_DIR)/bin
-ASSET_FEEDS_DIR := $(PAK_DIR)/assets/feeds
-ASSET_THEMES_DIR := $(PAK_DIR)/assets/themes
-ASSET_DATA_DIR := $(PAK_DIR)/assets/data
+PKG_CONFIG := pkg-config
+SDL_CFLAGS  := $(shell $(PKG_CONFIG) --cflags sdl2)
+SDL_LDFLAGS := $(shell $(PKG_CONFIG) --libs sdl2) -lSDL2_ttf -lSDL2_image
 
-TARGET := $(BIN_DIR)/nextfeed
-SRC := $(ROOT_DIR)/src/main.cpp
+WORKSPACE  := /workspace
+BUILD_DIR  ?= $(WORKSPACE)/build/tg5040
+SRC        := $(WORKSPACE)/src/main.c
+AP_INCLUDE := $(WORKSPACE)/third_party/apostrophe/include
+DEPS       := $(AP_INCLUDE)/apostrophe.h $(AP_INCLUDE)/apostrophe_widgets.h
 
-CXX ?= aarch64-nextui-linux-gnu-g++
-STRIP ?= aarch64-nextui-linux-gnu-strip
+CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
+	-mcpu=cortex-a53 -mtune=cortex-a53 \
+	-DPLATFORM_TG5040 \
+	-I$(AP_INCLUDE) \
+	$(SDL_CFLAGS)
 
-CXXFLAGS ?= -O2 -std=c++17
-SDL_CFLAGS := -I$(SYSROOT)/usr/include/SDL2
-SDL_LDFLAGS := -L$(SYSROOT)/usr/lib -lSDL2 -lSDL2_ttf
+LDFLAGS := $(SDL_LDFLAGS) -lpthread -ldl -lm
 
-all: sync-assets build
-	@echo "tg5040 pak prepared."
+.PHONY: all clean
 
-sync-assets:
-	mkdir -p $(ASSET_FEEDS_DIR) $(ASSET_THEMES_DIR) $(ASSET_DATA_DIR) $(BIN_DIR)
-	cp $(ROOT_DIR)/assets/feeds/default_feeds.txt $(ASSET_FEEDS_DIR)/default_feeds.txt
-	cp $(ROOT_DIR)/assets/themes/default.theme $(ASSET_THEMES_DIR)/default.theme
-	cp $(ROOT_DIR)/assets/data/demo_content.txt $(ASSET_DATA_DIR)/demo_content.txt
-	cp $(ROOT_DIR)/pak.json $(PAK_DIR)/pak.json
+all: $(BUILD_DIR)/nextfeed
 
-build:
-	mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(SDL_CFLAGS) -o $(TARGET) $(SRC) $(SDL_LDFLAGS)
-	$(STRIP) $(TARGET)
+$(BUILD_DIR)/nextfeed: $(SRC) $(DEPS)
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 clean:
-	rm -f $(TARGET)
-	rm -f $(PAK_DIR)/pak.json
-	rm -f $(ASSET_FEEDS_DIR)/default_feeds.txt
-	rm -f $(ASSET_THEMES_DIR)/default.theme
-	rm -f $(ASSET_DATA_DIR)/demo_content.txt
+	rm -rf $(BUILD_DIR)
