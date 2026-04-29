@@ -26,7 +26,9 @@ Browse headlines from your favorite feeds directly on your TrimUI Brick or Smart
 
 ## Screenshots
 
-*Coming soon*
+| Feed List | Article List | Article Detail |
+|-----------|-------------|----------------|
+| ![Feed List](assets/screenshots/main.png) | ![Article List](assets/screenshots/list.png) | ![Article Detail](assets/screenshots/article.png) |
 
 ## Installation
 
