@@ -1,0 +1,5 @@
+NextFeed pak launched successfully.
+The launcher is working, but the app binary is not built yet.
+
+Expected binary path:
+/Users/htpc/Projects/nextui-rss-reader/ports/tg5040/pak/bin/nextfeed

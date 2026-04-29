@@ -1,0 +1,9 @@
+# NextFeed — Default Feeds
+# Format: Label|URL (one per line)
+# Lines starting with # are comments
+
+Hacker News|https://news.ycombinator.com/rss
+Ars Technica|https://feeds.arstechnica.com/arstechnica/index
+Lobsters|https://lobste.rs/rss
+The Verge|https://www.theverge.com/rss/index.xml
+Slashdot|https://rss.slashdot.org/Slashdot/slashdotMain

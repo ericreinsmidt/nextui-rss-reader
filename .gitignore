@@ -1,0 +1,16 @@
+.DS_Store
+Thumbs.db
+
+build/
+dist/
+out/
+release/.local-test/
+
+*.o
+*.a
+*.so
+*.elf
+*.log
+*.tmp
+
+ports/tg5040/pak/bin/nextfeed

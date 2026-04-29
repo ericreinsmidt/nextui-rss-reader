@@ -1,0 +1,18 @@
+{
+  "name": "NextFeed",
+  "version": "0.1.0",
+  "type": "TOOL",
+  "description": "Offline-friendly RSS and Atom reader for NextUI devices.",
+  "author": "Eric",
+  "repo_url": "https://github.com/YOUR_USERNAME/nextui-rss-reader",
+  "release_filename": "NextFeed.v0.1.0.zip",
+  "platforms": ["tg5040"],
+  "changelog": {
+    "0.1.0": [
+      "Initial project skeleton",
+      "Pak launcher and persistent state setup",
+      "Ready for MVP development"
+    ]
+  },
+  "screenshots": []
+}

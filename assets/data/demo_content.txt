@@ -1,0 +1,16 @@
+FEED|FILE TEST FEED ONE
+ARTICLE|FILE TEST ARTICLE ONE
+BODY|Loaded from demo_content.txt line 1.
+BODY|Loaded from demo_content.txt line 2.
+BODY|If you see this, file-backed loading is working.
+
+ARTICLE|FILE TEST ARTICLE TWO
+BODY|Second file-backed article body.
+
+FEED|FILE TEST FEED TWO
+ARTICLE|SECOND FEED ARTICLE
+BODY|This content should clearly differ from the old hardcoded data.
+
+FEED|FILE TEST FEED THREE
+ARTICLE|THIRD FEED ARTICLE
+BODY|Third feed from file-backed demo content.
