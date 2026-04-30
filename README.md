@@ -7,13 +7,18 @@ Browse headlines from your favorite feeds directly on your TrimUI Brick or Smart
 ## Features
 
 - **RSS 2.0 and Atom** feed support
-- **On-device feed management** — add, edit, and delete feeds
-- **Article detail view** with source, date, and description (when available)
+- **On-device feed management** — add, edit, delete, and reorder feeds
+- **Offline reading** — feeds cached locally, auto-refreshed when older than one hour
+- **Article detail view** with source domain, publish date, and description
+- **Color customization** — background, text, and hint colors via built-in color picker
 - **Native NextUI look** via [Apostrophe](https://github.com/Helaas/Apostrophe) UI toolkit
 - **HTTPS support** with bundled CA certificates
 - **Loading indicators** during feed fetches
 - **Refresh** from the article list
-- **Persistent config** — feeds saved to `feeds.txt` on the SD card
+- **Article count** shown next to each feed name
+- **Status bar** with clock, battery, and WiFi indicators
+- **Reddit support** — add any subreddit as a feed
+- **Persistent config** — feeds and settings saved to SD card
 
 ## Supported Devices
 
@@ -47,7 +52,7 @@ NextFeed ships with these feeds pre-configured:
 - The Verge
 - Slashdot
 
-You can add, edit, or delete feeds from the feed list screen on the device. Add any subreddit with .rss after the subreddit name, e.g., https://reddit.com/r/example/.rss
+You can add, edit, or delete feeds from the feed list screen on the device. Add any subreddit with `.rss` after the subreddit URL, e.g., `https://reddit.com/r/example/.rss`
 
 ## Controls
 
@@ -57,8 +62,16 @@ You can add, edit, or delete feeds from the feed list screen on the device. Add 
 |--------|--------|
 | A | Open feed |
 | X | Add new feed |
-| Select | Manage feed (edit/delete) |
+| Y | Menu (manage feed, colors, about) |
 | B | Quit |
+
+### Menu
+
+| Option | Description |
+|--------|-------------|
+| Manage Feed | Edit, delete, reorder, or clear cache for selected feed |
+| Colors | Customize background, text, and hint colors |
+| About | Version info and credits |
 
 ### Article List
 
@@ -149,8 +162,9 @@ nextui-rss-reader/
 ├── src/
 │   └── main.c                     # Application source
 ├── assets/
-│   └── feeds/
-│       └── default_feeds.txt      # Default feed list
+│   ├── feeds/
+│   │   └── default_feeds.txt      # Default feed list
+│   └── screenshots/               # README screenshots
 ├── ports/
 │   └── tg5040/
 │       ├── Makefile               # Cross-compile makefile
@@ -181,13 +195,14 @@ On-device, NextFeed stores data at:
 | Path | Purpose |
 |------|---------|
 | `/mnt/SDCARD/.userdata/tg5040/nextfeed/config/feeds.txt` | User's feed list |
-| `/mnt/SDCARD/.userdata/tg5040/nextfeed/cache/` | Feed cache (future) |
+| `/mnt/SDCARD/.userdata/tg5040/nextfeed/config/settings.txt` | Color settings |
+| `/mnt/SDCARD/.userdata/tg5040/nextfeed/cache/` | Cached feed XML |
 | `/mnt/SDCARD/.userdata/tg5040/logs/nextfeed.log` | Log file |
 
 ## Acknowledgments
 
 - **[NextUI](https://github.com/LoveRetro/NextUI)** — Custom firmware for TrimUI devices by LoveRetro.
-- **[Apostrophe](https://github.com/Helaas/Apostrophe)** — C UI toolkit for NextUI paks by Helaas. Provides the native-looking list, detail, keyboard, and dialog widgets used throughout NextFeed. MIT licensed.
+- **[Apostrophe](https://github.com/Helaas/Apostrophe)** — C UI toolkit for NextUI paks by Helaas. MIT licensed.
 - **[libcurl](https://curl.se/)** — HTTP client library. Built as a static library for HTTPS feed fetching.
 
 ## License
