@@ -44,7 +44,6 @@ NextFeed ships with these feeds pre-configured:
 
 - Retro Handhelds
 - Retro Game Corps
-- NextUI subreddit
 - TrimUI subreddit
 - Ars Technica
 - The Verge
