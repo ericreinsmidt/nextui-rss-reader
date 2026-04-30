@@ -57,7 +57,7 @@ NextFeed ships with these feeds pre-configured:
 - The Verge
 - Slashdot
 
-You can add, edit, or delete feeds from the feed list screen on the device. Add any subreddit with `.rss` after the subreddit URL, e.g., `https://reddit.com/r/example/.rss`
+You can add feeds from the feed list screen, and edit or delete them from the menu screen. Add any subreddit with `.rss` after the subreddit URL, e.g., `https://reddit.com/r/example/.rss`
 
 ## Controls
 
