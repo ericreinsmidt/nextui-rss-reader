@@ -3,8 +3,7 @@
 
 Retro Handhelds|https://retrohandhelds.gg/feed/
 Retro Game Corps|https://retrogamecorps.com/feed/
-Hacker News|https://news.ycombinator.com/rss
+TrimUI subreddit|https://reddit.com/r/trimui/.rss
 Ars Technica|https://feeds.arstechnica.com/arstechnica/index
-Lobsters|https://lobste.rs/rss
 The Verge|https://www.theverge.com/rss/index.xml
 Slashdot|https://rss.slashdot.org/Slashdot/slashdotMain
