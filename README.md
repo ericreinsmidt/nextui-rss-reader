@@ -44,11 +44,13 @@ NextFeed ships with these feeds pre-configured:
 
 - Retro Handhelds
 - Retro Game Corps
+- NextUI subreddit
+- TrimUI subreddit
 - Ars Technica
 - The Verge
 - Slashdot
 
-You can add, edit, or delete feeds from the feed list screen on the device.
+You can add, edit, or delete feeds from the feed list screen on the device. Add any subreddit with .rss after the subreddit name, e.g., https://reddit.com/r/example/.rss
 
 ## Controls
 
@@ -148,13 +150,13 @@ Then copy `ports/tg5040/pak/` to `/Tools/tg5040/NextFeed.pak/` on your SD card.
 ```
 nextui-rss-reader/
 ├── src/
-│   └── main.c                 # Application source
+│   └── main.c                     # Application source
 ├── assets/
 │   └── feeds/
-│       └── default_feeds.txt    # Default feed list (source of truth)
+│       └── default_feeds.txt      # Default feed list
 ├── ports/
 │   └── tg5040/
-│       ├── Makefile              # Cross-compile makefile
+│       ├── Makefile               # Cross-compile makefile
 │       └── pak/
 │           ├── launch.sh          # Pak entrypoint
 │           ├── pak.json           # Pak metadata
@@ -168,7 +170,7 @@ nextui-rss-reader/
 │   ├── package_pak.sh
 │   └── sync_feeds.py
 ├── third_party/
-│   └── apostrophe/              # Git submodule
+│   └── apostrophe/                 # Git submodule
 ├── pak.json
 ├── Makefile
 ├── LICENSE
