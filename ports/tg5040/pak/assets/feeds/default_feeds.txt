@@ -3,6 +3,8 @@
 
 Retro Handhelds|https://retrohandhelds.gg/feed/
 Retro Game Corps|https://retrogamecorps.com/feed/
+TrimUI subreddit|https://reddit.com/r/trimui/.rss
 Ars Technica|https://feeds.arstechnica.com/arstechnica/index
 The Verge|https://www.theverge.com/rss/index.xml
 Slashdot|https://rss.slashdot.org/Slashdot/slashdotMain
+The Old Man and the Sky|https://theoldmanandthesky.com/rss.xml
