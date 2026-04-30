@@ -8,28 +8,8 @@
   "release_filename": "NextFeed.tg5040.pak.zip",
   "platforms": ["tg5040"],
   "changelog": {
-    "0.1.0": [
-      "RSS 2.0 and Atom feed parsing",
-      "HTTP fetch via libcurl with HTTPS (bundled CA certs)",
-      "Article detail with source domain, publish date, smart description filtering",
-      "Refresh button (X) on article list",
-      "Native NextUI look via Apostrophe with disabled wallpaper background"
-    ],
-    "0.2.0": [
-      "Disk caching of raw XML per feed",
-      "Auto-refresh on launch (feeds older than 1 hour)",
-      "Article count shown next to feed names",
-      "Feed management: add, edit, delete, reorder",
-      "Clear cache per feed",
-      "Double-decode XML entities for Reddit compatibility",
-      "Generic numeric entity decoder",
-      "Loading indicators during fetches",
-      "Status bar with clock, battery, WiFi",
-      "Color settings with color picker",
-      "Persistent settings",
-      "About screen",
-      "Menu system via Y button"
-    ]
+    "0.2.0": "Added caching of raw XML per feed, auto-refresh on launch, and article count shown next to feed names, color picker and more.",
+    "0.1.0": "RSS 2.0 and Atom feed parsing,using Apostrophe for native NextUI look."
   },
   "screenshots": [
     "assets/screenshots/main.png",
