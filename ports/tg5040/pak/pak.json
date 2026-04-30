@@ -34,6 +34,9 @@
   "screenshots": [
     "assets/screenshots/main.png",
     "assets/screenshots/list.png",
-    "assets/screenshots/article.png"
+    "assets/screenshots/article.png",
+    "assets/screenshots/manage.png",
+    "assets/screenshots/color.png",
+    "assets/screenshots/about.png"
   ]
 }
