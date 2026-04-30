@@ -1,7 +1,6 @@
 /*
  * NextFeed — RSS/Atom reader for NextUI
- * Apostrophe UI + libcurl + RSS/Atom parsing.
- * Features: loading indicator, refresh, feed management (add/edit/delete).
+ * Apostrophe UI + libcurl + RSS/Atom parsing + caching + settings.
  */
 
 #define AP_IMPLEMENTATION
@@ -11,6 +10,8 @@
 
 #include <string.h>
 #include <curl/curl.h>
+#include <sys/stat.h>
+#include <time.h>
 
 /* -----------------------------------------------------------------------
  * Constants
@@ -25,7 +26,20 @@
 #define MAX_LINE     1024
 #define MAX_DATE     64
 #define MAX_DOMAIN   128
+#define MAX_PATH_LEN 1024
 #define MIN_USEFUL_DESC 50
+#define CACHE_MAX_AGE_SECS (60 * 60)
+#define NEXTFEED_VERSION "0.2.0"
+
+#define DEFAULT_BG_R   30
+#define DEFAULT_BG_G   30
+#define DEFAULT_BG_B   35
+#define DEFAULT_TEXT_R  220
+#define DEFAULT_TEXT_G  220
+#define DEFAULT_TEXT_B  220
+#define DEFAULT_HINT_R  140
+#define DEFAULT_HINT_G  140
+#define DEFAULT_HINT_B  150
 
 /* -----------------------------------------------------------------------
  * Data structures
@@ -34,6 +48,7 @@
 typedef struct {
     char label[MAX_LABEL];
     char url[MAX_URL];
+    int  cached_article_count;
 } feed_t;
 
 typedef struct {
@@ -56,6 +71,20 @@ typedef struct {
     int         result;
 } fetch_task_t;
 
+typedef struct {
+    feed_t *feeds;
+    int     feed_count;
+    int     refreshed;
+    int     failed;
+    char   *status_msg;
+} refresh_all_task_t;
+
+typedef struct {
+    ap_color bg_color;
+    ap_color text_color;
+    ap_color hint_color;
+} app_settings_t;
+
 /* -----------------------------------------------------------------------
  * Globals
  * ----------------------------------------------------------------------- */
@@ -66,7 +95,14 @@ static int       g_feed_count = 0;
 static article_t g_articles[MAX_ARTICLES];
 static int       g_article_count = 0;
 
-static char      g_feeds_path[1024] = {0};
+static char      g_feeds_path[MAX_PATH_LEN] = {0};
+static char      g_cache_dir[MAX_PATH_LEN] = {0};
+static char      g_config_dir[MAX_PATH_LEN] = {0};
+
+static app_settings_t g_settings;
+
+static ap_status_bar_opts g_status_bar = {.show_battery = true,.show_wifi    = true,
+};
 
 /* -----------------------------------------------------------------------
  * String helpers
@@ -94,60 +130,66 @@ static void decode_xml_entities(char *s) {
             else if (strncmp(r, "&gt;", 4) == 0)      { *w++ = '>'; r += 4; }
             else if (strncmp(r, "&quot;", 6) == 0)     { *w++ = '"'; r += 6; }
             else if (strncmp(r, "&apos;", 6) == 0)     { *w++ = '\''; r += 6; }
-            else if (strncmp(r, "&#x27;", 6) == 0)    { *w++ = '\''; r += 6; }
-            else if (strncmp(r, "&#39;", 5) == 0)     { *w++ = '\''; r += 5; }
-            else if (strncmp(r, "&#34;", 5) == 0)     { *w++ = '"'; r += 5; }
             else if (strncmp(r, "&ldquo;", 7) == 0)   { *w++ = '"'; r += 7; }
             else if (strncmp(r, "&rdquo;", 7) == 0)   { *w++ = '"'; r += 7; }
             else if (strncmp(r, "&lsquo;", 7) == 0)   { *w++ = '\''; r += 7; }
             else if (strncmp(r, "&rsquo;", 7) == 0)   { *w++ = '\''; r += 7; }
-            else if (strncmp(r, "&#8220;", 7) == 0)   { *w++ = '"'; r += 7; }
-            else if (strncmp(r, "&#8221;", 7) == 0)   { *w++ = '"'; r += 7; }
-            else if (strncmp(r, "&#8216;", 7) == 0)   { *w++ = '\''; r += 7; }
-            else if (strncmp(r, "&#8217;", 7) == 0)   { *w++ = '\''; r += 7; }
             else if (strncmp(r, "&mdash;", 7) == 0)   { *w++ = '-'; *w++ = '-'; r += 7; }
             else if (strncmp(r, "&ndash;", 7) == 0)   { *w++ = '-'; r += 7; }
-            else if (strncmp(r, "&#8212;", 7) == 0)   { *w++ = '-'; *w++ = '-'; r += 7; }
-            else if (strncmp(r, "&#8211;", 7) == 0)   { *w++ = '-'; r += 7; }
             else if (strncmp(r, "&hellip;", 8) == 0)  { *w++ = '.'; *w++ = '.'; *w++ = '.'; r += 8; }
-            else if (strncmp(r, "&#8230;", 7) == 0)   { *w++ = '.'; *w++ = '.'; *w++ = '.'; r += 7; }
             else if (strncmp(r, " ", 6) == 0)    { *w++ = ' '; r += 6; }
-            else if (strncmp(r, "&#160;", 6) == 0)    { *w++ = ' '; r += 6; }
             else if (strncmp(r, "&copy;", 6) == 0)    { *w++ = '('; *w++ = 'c'; *w++ = ')'; r += 6; }
             else if (strncmp(r, "&reg;", 5) == 0)     { *w++ = '('; *w++ = 'R'; *w++ = ')'; r += 5; }
             else if (strncmp(r, "&trade;", 7) == 0)   { *w++ = 'T'; *w++ = 'M'; r += 7; }
+            else if (r[1] == '#') {
+                unsigned int codepoint = 0;
+                const char *end = NULL;
+                if (r[2] == 'x' || r[2] == 'X') {
+                    const char *hex_start = r + 3;
+                    char *hex_end = NULL;
+                    codepoint = (unsigned int)strtoul(hex_start, &hex_end, 16);
+                    if (hex_end && *hex_end == ';') end = hex_end + 1;
+                } else {
+                    const char *dec_start = r + 2;
+                    char *dec_end = NULL;
+                    codepoint = (unsigned int)strtoul(dec_start, &dec_end, 10);
+                    if (dec_end && *dec_end == ';') end = dec_end + 1;
+                }
+                if (end && codepoint > 0) {
+                    if (codepoint < 128)                             { *w++ = (char)codepoint; }
+                    else if (codepoint == 8216 || codepoint == 8217) { *w++ = '\''; }
+                    else if (codepoint == 8220 || codepoint == 8221) { *w++ = '"'; }
+                    else if (codepoint == 8211)                      { *w++ = '-'; }
+                    else if (codepoint == 8212)                      { *w++ = '-'; *w++ = '-'; }
+                    else if (codepoint == 8230)                      { *w++ = '.'; *w++ = '.'; *w++ = '.'; }
+                    else if (codepoint == 160)                       { *w++ = ' '; }
+                    else if (codepoint == 169)                       { *w++ = '('; *w++ = 'c'; *w++ = ')'; }
+                    else if (codepoint == 174)                       { *w++ = '('; *w++ = 'R'; *w++ = ')'; }
+                    else if (codepoint == 8226)                      { *w++ = '*'; }
+                    else if (codepoint == 8364)                      { *w++ = 'E'; }
+                    else if (codepoint == 163)                       { *w++ = 'L'; }
+                    else                                             { *w++ = '?'; }
+                    r = end;
+                } else { *w++ = *r++; }
+            }
             else { *w++ = *r++; }
-        } else {
-            *w++ = *r++;
-        }
+        } else { *w++ = *r++; }
     }
     *w = '\0';
 }
 
 static void strip_html_tags(char *s) {
     char *r = s, *w = s;
-    int in_tag = 0;
-    int in_cdata = 0;
-
+    int in_tag = 0, in_cdata = 0;
     while (*r) {
-        if (strncmp(r, "<![CDATA[", 9) == 0) {
-            r += 9;
-            in_cdata = 1;
-            continue;
-        }
-        if (in_cdata && strncmp(r, "]]>", 3) == 0) {
-            r += 3;
-            in_cdata = 0;
-            continue;
-        }
+        if (strncmp(r, "<![CDATA[", 9) == 0) { r += 9; in_cdata = 1; continue; }
+        if (in_cdata && strncmp(r, "]]>", 3) == 0) { r += 3; in_cdata = 0; continue; }
         if (in_cdata) {
             if (*r == '<') { in_tag = 1; r++; continue; }
             if (*r == '>' && in_tag) { in_tag = 0; r++; continue; }
             if (!in_tag) *w++ = *r;
-            r++;
-            continue;
+            r++; continue;
         }
-
         if (*r == '<') { in_tag = 1; r++; continue; }
         if (*r == '>' && in_tag) { in_tag = 0; r++; continue; }
         if (!in_tag) *w++ = *r;
@@ -157,78 +199,44 @@ static void strip_html_tags(char *s) {
 }
 
 /* -----------------------------------------------------------------------
- * Domain extraction
+ * Domain / Date / Description helpers
  * ----------------------------------------------------------------------- */
 
 static void extract_domain(const char *url, char *domain, size_t domain_size) {
     domain[0] = '\0';
     if (!url || !url[0]) return;
-
     const char *start = strstr(url, "://");
-    if (start) {
-        start += 3;
-    } else {
-        start = url;
-    }
-
-    if (strncmp(start, "www.", 4) == 0) {
-        start += 4;
-    }
-
+    if (start) { start += 3; } else { start = url; }
+    if (strncmp(start, "www.", 4) == 0) start += 4;
     const char *end = strchr(start, '/');
-    size_t len;
-    if (end) {
-        len = (size_t)(end - start);
-    } else {
-        len = strlen(start);
-    }
-
+    size_t len = end ? (size_t)(end - start) : strlen(start);
     if (len >= domain_size) len = domain_size - 1;
     memcpy(domain, start, len);
     domain[len] = '\0';
 }
 
-/* -----------------------------------------------------------------------
- * Date parsing
- * ----------------------------------------------------------------------- */
-
 static const char *month_names[] = {
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
 };
 
 static int month_from_name(const char *name) {
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < 12; i++)
         if (strncasecmp(name, month_names[i], 3) == 0) return i + 1;
-    }
     return 0;
 }
 
 static void parse_rfc2822_date(const char *raw, char *out, size_t out_size) {
     out[0] = '\0';
     const char *p = strchr(raw, ',');
-    if (p) {
-        p++;
-        while (*p == ' ') p++;
-    } else {
-        p = raw;
-    }
-
-    int day = 0;
-    char mon_str[16] = {0};
-    int year = 0;
-    int hour = 0, min = 0;
-
+    if (p) { p++; while (*p == ' ') p++; } else { p = raw; }
+    int day = 0; char mon_str[16] = {0}; int year = 0, hour = 0, min = 0;
     if (sscanf(p, "%d %15s %d %d:%d", &day, mon_str, &year, &hour, &min) >= 3) {
         int month = month_from_name(mon_str);
         if (month > 0 && day > 0 && year > 0) {
-            if (hour >= 0 && min >= 0) {
-                snprintf(out, out_size, "%s %d, %d %02d:%02d",
-                         month_names[month - 1], day, year, hour, min);
-            } else {
-                snprintf(out, out_size, "%s %d, %d",
-                         month_names[month - 1], day, year);
-            }
+            if (hour >= 0 && min >= 0)
+                snprintf(out, out_size, "%s %d, %d %02d:%02d", month_names[month-1], day, year, hour, min);
+            else
+                snprintf(out, out_size, "%s %d, %d", month_names[month-1], day, year);
         }
     }
 }
@@ -236,16 +244,12 @@ static void parse_rfc2822_date(const char *raw, char *out, size_t out_size) {
 static void parse_iso8601_date(const char *raw, char *out, size_t out_size) {
     out[0] = '\0';
     int year = 0, month = 0, day = 0, hour = 0, min = 0;
-
     if (sscanf(raw, "%d-%d-%dT%d:%d", &year, &month, &day, &hour, &min) >= 3) {
         if (month >= 1 && month <= 12 && day > 0 && year > 0) {
-            if (hour >= 0 && min >= 0) {
-                snprintf(out, out_size, "%s %d, %d %02d:%02d",
-                         month_names[month - 1], day, year, hour, min);
-            } else {
-                snprintf(out, out_size, "%s %d, %d",
-                         month_names[month - 1], day, year);
-            }
+            if (hour >= 0 && min >= 0)
+                snprintf(out, out_size, "%s %d, %d %02d:%02d", month_names[month-1], day, year, hour, min);
+            else
+                snprintf(out, out_size, "%s %d, %d", month_names[month-1], day, year);
         }
     }
 }
@@ -253,11 +257,8 @@ static void parse_iso8601_date(const char *raw, char *out, size_t out_size) {
 static void parse_date(const char *raw, char *out, size_t out_size) {
     out[0] = '\0';
     if (!raw || !raw[0]) return;
-    if (raw[0] >= '0' && raw[0] <= '9') {
-        parse_iso8601_date(raw, out, out_size);
-    } else {
-        parse_rfc2822_date(raw, out, out_size);
-    }
+    if (raw[0] >= '0' && raw[0] <= '9') parse_iso8601_date(raw, out, out_size);
+    else parse_rfc2822_date(raw, out, out_size);
 }
 
 static int is_useful_description(const char *desc) {
@@ -268,24 +269,165 @@ static int is_useful_description(const char *desc) {
 }
 
 /* -----------------------------------------------------------------------
+ * Settings load/save
+ * ----------------------------------------------------------------------- */
+
+static void settings_set_defaults(void) {
+    g_settings.bg_color   = (ap_color){DEFAULT_BG_R, DEFAULT_BG_G, DEFAULT_BG_B, 255};
+    g_settings.text_color = (ap_color){DEFAULT_TEXT_R, DEFAULT_TEXT_G, DEFAULT_TEXT_B, 255};
+    g_settings.hint_color = (ap_color){DEFAULT_HINT_R, DEFAULT_HINT_G, DEFAULT_HINT_B, 255};
+}
+
+static void settings_apply(void) {
+    ap_theme *theme = ap_get_theme();
+    theme->background = g_settings.bg_color;
+    theme->text       = g_settings.text_color;
+    theme->hint       = g_settings.hint_color;
+}
+
+static void settings_save(void) {
+    if (g_config_dir[0] == '\0') return;
+    char path[MAX_PATH_LEN];
+    snprintf(path, sizeof(path), "%s/settings.txt", g_config_dir);
+    FILE *f = fopen(path, "w");
+    if (!f) { ap_log("settings: could not write %s", path); return; }
+    fprintf(f, "bg_color=#%02X%02X%02X\n", g_settings.bg_color.r, g_settings.bg_color.g, g_settings.bg_color.b);
+    fprintf(f, "text_color=#%02X%02X%02X\n", g_settings.text_color.r, g_settings.text_color.g, g_settings.text_color.b);
+    fprintf(f, "hint_color=#%02X%02X%02X\n", g_settings.hint_color.r, g_settings.hint_color.g, g_settings.hint_color.b);
+    fclose(f);
+    ap_log("settings: saved to %s", path);
+}
+
+static int parse_hex_color(const char *hex, ap_color *out) {
+    if (!hex || hex[0] != '#' || strlen(hex) < 7) return -1;
+    unsigned int r, g, b;
+    if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) == 3) {
+        out->r = (uint8_t)r; out->g = (uint8_t)g; out->b = (uint8_t)b; out->a = 255;
+        return 0;
+    }
+    return -1;
+}
+
+static void settings_load(void) {
+    settings_set_defaults();
+    if (g_config_dir[0] == '\0') return;
+    char path[MAX_PATH_LEN];
+    snprintf(path, sizeof(path), "%s/settings.txt", g_config_dir);
+    FILE *f = fopen(path, "r");
+    if (!f) { ap_log("settings: no settings file, using defaults"); return; }
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        trim_inplace(line);
+        if (line[0] == '#' || line[0] == '\0') continue;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *key = line; char *val = eq + 1;
+        trim_inplace(key); trim_inplace(val);
+        if (strcmp(key, "bg_color") == 0) parse_hex_color(val, &g_settings.bg_color);
+        else if (strcmp(key, "text_color") == 0) parse_hex_color(val, &g_settings.text_color);
+        else if (strcmp(key, "hint_color") == 0) parse_hex_color(val, &g_settings.hint_color);
+    }
+    fclose(f);
+    ap_log("settings: loaded from %s", path);
+}
+
+/* -----------------------------------------------------------------------
+ * Cache helpers
+ * ----------------------------------------------------------------------- */
+
+static void url_to_cache_filename(const char *url, char *out, size_t out_size) {
+    unsigned long hash = 5381;
+    const char *p = url;
+    while (*p) { hash = ((hash << 5) + hash) + (unsigned char)*p; p++; }
+    snprintf(out, out_size, "%08lx.xml", hash);
+}
+
+static void get_cache_path(const char *url, char *out, size_t out_size) {
+    char filename[64];
+    url_to_cache_filename(url, filename, sizeof(filename));
+    snprintf(out, out_size, "%s/%s", g_cache_dir, filename);
+}
+
+static int cache_exists(const char *url) {
+    if (g_cache_dir[0] == '\0' || !url || !url[0]) return 0;
+    char path[MAX_PATH_LEN];
+    get_cache_path(url, path, sizeof(path));
+    return access(path, R_OK) == 0;
+}
+
+static long cache_age_secs(const char *url) {
+    if (g_cache_dir[0] == '\0' || !url || !url[0]) return -1;
+    char path[MAX_PATH_LEN];
+    get_cache_path(url, path, sizeof(path));
+    struct stat st;
+    if (stat(path, &st) != 0) return -1;
+    time_t now = time(NULL);
+    return (long)(now - st.st_mtime);
+}
+
+static int save_to_cache(const char *url, const char *data, size_t size) {
+    if (g_cache_dir[0] == '\0') return -1;
+    char path[MAX_PATH_LEN];
+    get_cache_path(url, path, sizeof(path));
+    FILE *f = fopen(path, "w");
+    if (!f) { ap_log("cache: could not write %s", path); return -1; }
+    fwrite(data, 1, size, f);
+    fclose(f);
+    ap_log("cache: saved %zu bytes to %s", size, path);
+    return 0;
+}
+
+static char *load_from_cache(const char *url) {
+    char path[MAX_PATH_LEN];
+    get_cache_path(url, path, sizeof(path));
+    FILE *f = fopen(path, "r");
+    if (!f) { ap_log("cache: no cache for %s", path); return NULL; }
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (fsize <= 0) { fclose(f); return NULL; }
+    char *data = malloc((size_t)fsize + 1);
+    if (!data) { fclose(f); return NULL; }
+    size_t read_bytes = fread(data, 1, (size_t)fsize, f);
+    fclose(f);
+    data[read_bytes] = '\0';
+    ap_log("cache: loaded %zu bytes from %s", read_bytes, path);
+    return data;
+}
+
+static void clear_feed_cache(const char *url) {
+    if (g_cache_dir[0] == '\0' || !url || !url[0]) return;
+    char path[MAX_PATH_LEN];
+    get_cache_path(url, path, sizeof(path));
+    if (remove(path) == 0) ap_log("cache: cleared %s", path);
+}
+
+static int count_cached_articles(const char *url) {
+    if (!cache_exists(url)) return -1;
+    char *xml = load_from_cache(url);
+    if (!xml) return -1;
+    int is_atom = (strstr(xml, "<feed") != NULL);
+    const char *tag = is_atom ? "<entry" : "<item";
+    int count = 0;
+    const char *p = xml;
+    while ((p = strstr(p, tag)) != NULL) { count++; p++; }
+    free(xml);
+    return count;
+}
+
+/* -----------------------------------------------------------------------
  * Feed config loading and saving
  * ----------------------------------------------------------------------- */
 
 static int load_feeds(const char *path) {
     FILE *f = fopen(path, "r");
-    if (!f) {
-        ap_log("Could not open feeds file: %s", path);
-        return 0;
-    }
-
+    if (!f) { ap_log("Could not open feeds file: %s", path); return 0; }
     char line[MAX_LINE];
     g_feed_count = 0;
-
     while (fgets(line, sizeof(line), f) && g_feed_count < MAX_FEEDS) {
         trim_inplace(line);
-        if (line[0] == '\0' || line[0] == '#')
-            continue;
-
+        if (line[0] == '\0' || line[0] == '#') continue;
         char *sep = strchr(line, '|');
         if (sep) {
             *sep = '\0';
@@ -297,7 +439,7 @@ static int load_feeds(const char *path) {
             strncpy(g_feeds[g_feed_count].label, line, MAX_LABEL - 1);
             g_feeds[g_feed_count].url[0] = '\0';
         }
-
+        g_feeds[g_feed_count].cached_article_count = -1;
         if (g_feeds[g_feed_count].label[0] != '\0') {
             ap_log("  Feed %d: %s [%s]", g_feed_count,
                    g_feeds[g_feed_count].label,
@@ -305,7 +447,6 @@ static int load_feeds(const char *path) {
             g_feed_count++;
         }
     }
-
     fclose(f);
     ap_log("Loaded %d feed(s) from %s", g_feed_count, path);
     return g_feed_count;
@@ -313,22 +454,15 @@ static int load_feeds(const char *path) {
 
 static int save_feeds(const char *path) {
     FILE *f = fopen(path, "w");
-    if (!f) {
-        ap_log("Could not write feeds file: %s", path);
-        return -1;
-    }
-
+    if (!f) { ap_log("Could not write feeds file: %s", path); return -1; }
     fprintf(f, "# NextFeed — Feed Configuration\n");
     fprintf(f, "# Format: Label|URL (one per line)\n\n");
-
     for (int i = 0; i < g_feed_count; i++) {
-        if (g_feeds[i].url[0]) {
+        if (g_feeds[i].url[0])
             fprintf(f, "%s|%s\n", g_feeds[i].label, g_feeds[i].url);
-        } else {
+        else
             fprintf(f, "%s\n", g_feeds[i].label);
-        }
     }
-
     fclose(f);
     ap_log("Saved %d feed(s) to %s", g_feed_count, path);
     return 0;
@@ -343,7 +477,6 @@ static const char *resolve_feeds_path(void) {
             return g_feeds_path;
         }
     }
-
     const char *pak_dir = getenv("NEXTFEED_PAK_DIR");
     if (pak_dir) {
         snprintf(g_feeds_path, sizeof(g_feeds_path), "%s/assets/feeds/default_feeds.txt", pak_dir);
@@ -352,10 +485,18 @@ static const char *resolve_feeds_path(void) {
             return g_feeds_path;
         }
     }
-
     snprintf(g_feeds_path, sizeof(g_feeds_path), "assets/feeds/default_feeds.txt");
     ap_log("Using local dev feeds: %s", g_feeds_path);
     return g_feeds_path;
+}
+
+static void update_article_counts(void) {
+    for (int i = 0; i < g_feed_count; i++) {
+        if (g_feeds[i].url[0])
+            g_feeds[i].cached_article_count = count_cached_articles(g_feeds[i].url);
+        else
+            g_feeds[i].cached_article_count = -1;
+    }
 }
 
 /* -----------------------------------------------------------------------
@@ -365,7 +506,6 @@ static const char *resolve_feeds_path(void) {
 static size_t fetch_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
     fetch_buf_t *buf = (fetch_buf_t *)userdata;
     size_t bytes = size * nmemb;
-
     while (buf->size + bytes + 1 > buf->capacity) {
         size_t new_cap = buf->capacity * 2;
         if (new_cap == 0) new_cap = 8192;
@@ -374,7 +514,6 @@ static size_t fetch_write_cb(void *ptr, size_t size, size_t nmemb, void *userdat
         buf->data = new_data;
         buf->capacity = new_cap;
     }
-
     memcpy(buf->data + buf->size, ptr, bytes);
     buf->size += bytes;
     buf->data[buf->size] = '\0';
@@ -382,16 +521,9 @@ static size_t fetch_write_cb(void *ptr, size_t size, size_t nmemb, void *userdat
 }
 
 static int fetch_url(const char *url, fetch_buf_t *buf) {
-    buf->data = NULL;
-    buf->size = 0;
-    buf->capacity = 0;
-
+    buf->data = NULL; buf->size = 0; buf->capacity = 0;
     CURL *curl = curl_easy_init();
-    if (!curl) {
-        ap_log("fetch: curl_easy_init failed");
-        return -1;
-    }
-
+    if (!curl) { ap_log("fetch: curl_easy_init failed"); return -1; }
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fetch_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, buf);
@@ -399,8 +531,7 @@ static int fetch_url(const char *url, fetch_buf_t *buf) {
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "NextFeed/0.1");
-
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "NextFeed/0.2");
     const char *ca = getenv("CURL_CA_BUNDLE");
     if (ca) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, ca);
@@ -408,20 +539,15 @@ static int fetch_url(const char *url, fetch_buf_t *buf) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     }
-
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     curl_easy_cleanup(curl);
-
     if (res != CURLE_OK) {
         ap_log("fetch: curl error: %s", curl_easy_strerror(res));
-        free(buf->data);
-        buf->data = NULL;
-        buf->size = 0;
+        free(buf->data); buf->data = NULL; buf->size = 0;
         return -1;
     }
-
     ap_log("fetch: %s -> HTTP %ld, %zu bytes", url, http_code, buf->size);
     return 0;
 }
@@ -433,51 +559,88 @@ static int fetch_worker(void *userdata) {
 }
 
 /* -----------------------------------------------------------------------
+ * Auto-refresh
+ * ----------------------------------------------------------------------- */
+
+static int refresh_all_worker(void *userdata) {
+    refresh_all_task_t *task = (refresh_all_task_t *)userdata;
+    task->refreshed = 0; task->failed = 0;
+    for (int i = 0; i < task->feed_count; i++) {
+        if (task->feeds[i].url[0] == '\0') continue;
+        long age = cache_age_secs(task->feeds[i].url);
+        if (age >= 0 && age < CACHE_MAX_AGE_SECS) {
+            ap_log("refresh_all: %s cache is %ld sec old, skipping", task->feeds[i].label, age);
+            continue;
+        }
+        ap_log("refresh_all: fetching %s", task->feeds[i].label);
+        if (task->status_msg)
+            snprintf(task->status_msg, 256, "Refreshing %s... (%d/%d)",
+                     task->feeds[i].label, i + 1, task->feed_count);
+        fetch_buf_t buf;
+        int rc = fetch_url(task->feeds[i].url, &buf);
+        if (rc == 0 && buf.data) {
+            save_to_cache(task->feeds[i].url, buf.data, buf.size);
+            task->refreshed++;
+            free(buf.data);
+        } else { task->failed++; }
+    }
+    return 0;
+}
+
+static void auto_refresh_feeds(void) {
+    int stale_count = 0;
+    for (int i = 0; i < g_feed_count; i++) {
+        if (g_feeds[i].url[0] == '\0') continue;
+        long age = cache_age_secs(g_feeds[i].url);
+        if (age < 0 || age >= CACHE_MAX_AGE_SECS) stale_count++;
+    }
+    if (stale_count == 0) { ap_log("auto_refresh: all feeds are fresh"); return; }
+    ap_log("auto_refresh: %d feed(s) need refreshing", stale_count);
+    char status_buf[256] = "Refreshing feeds...";
+    char *status_ptr = status_buf;
+    refresh_all_task_t task = {.feeds = g_feeds,.feed_count = g_feed_count,.refreshed = 0,.failed = 0,.status_msg = status_buf,
+    };
+    ap_process_opts proc = {.message = "Refreshing feeds...",.show_progress = false,.dynamic_message = &status_ptr,.message_lines = 2,
+    };
+    ap_process_message(&proc, refresh_all_worker, &task);
+    ap_log("auto_refresh: done. %d refreshed, %d failed", task.refreshed, task.failed);
+    update_article_counts();
+}
+
+/* -----------------------------------------------------------------------
  * RSS/Atom XML parser
  * ----------------------------------------------------------------------- */
 
 static const char *extract_tag(const char *xml, const char *tag,
                                char *out, size_t out_size) {
-    char open_exact[64];
-    char open_attr[64];
-    char close[64];
+    char open_exact[64], open_attr[64], close[64];
     snprintf(open_exact, sizeof(open_exact), "<%s>", tag);
     snprintf(open_attr, sizeof(open_attr), "<%s ", tag);
     snprintf(close, sizeof(close), "</%s>", tag);
-
     const char *start = strstr(xml, open_exact);
     const char *start_attr = strstr(xml, open_attr);
-
     if (!start && !start_attr) return NULL;
-    if (start && start_attr) {
+    if (start && start_attr)
         start = (start < start_attr) ? start : start_attr;
-    } else if (!start) {
-        start = start_attr;
-    }
-
+    else if (!start) start = start_attr;
     const char *content_start = strchr(start, '>');
     if (!content_start) return NULL;
     content_start++;
-
     const char *end = strstr(content_start, close);
     if (!end) return NULL;
-
     size_t len = (size_t)(end - content_start);
     if (len >= out_size) len = out_size - 1;
     memcpy(out, content_start, len);
     out[len] = '\0';
-
     return end + strlen(close);
 }
 
 static const char *extract_atom_link(const char *xml, char *out, size_t out_size) {
     out[0] = '\0';
     const char *link = xml;
-
     while ((link = strstr(link, "<link")) != NULL) {
         const char *tag_end = strchr(link, '>');
         if (!tag_end) return NULL;
-
         const char *href = strstr(link, "href=\"");
         if (href && href < tag_end) {
             href += 6;
@@ -487,15 +650,9 @@ static const char *extract_atom_link(const char *xml, char *out, size_t out_size
                 if (len >= out_size) len = out_size - 1;
                 memcpy(out, href, len);
                 out[len] = '\0';
-
                 const char *rel = strstr(link, "rel=\"alternate\"");
-                if (rel && rel < tag_end) {
-                    return tag_end + 1;
-                }
-
-                if (out[0] != '\0') {
-                    return tag_end + 1;
-                }
+                if (rel && rel < tag_end) return tag_end + 1;
+                if (out[0] != '\0') return tag_end + 1;
             }
         }
         link = tag_end + 1;
@@ -505,141 +662,110 @@ static const char *extract_atom_link(const char *xml, char *out, size_t out_size
 
 static int parse_feed_xml(const char *xml) {
     g_article_count = 0;
-
     if (!xml || !xml[0]) return 0;
-
     int is_atom = (strstr(xml, "<feed") != NULL);
     int is_rss  = (strstr(xml, "<rss") != NULL || strstr(xml, "<channel") != NULL);
-
-    if (!is_atom && !is_rss) {
-        ap_log("parse: unrecognized feed format");
-        return 0;
-    }
-
+    if (!is_atom && !is_rss) { ap_log("parse: unrecognized feed format"); return 0; }
     const char *item_tag = is_atom ? "entry" : "item";
     char open_exact[32], open_attr[32], close_tag[32];
     snprintf(open_exact, sizeof(open_exact), "<%s>", item_tag);
     snprintf(open_attr, sizeof(open_attr), "<%s ", item_tag);
     snprintf(close_tag, sizeof(close_tag), "</%s>", item_tag);
-
     const char *pos = xml;
-
     while (g_article_count < MAX_ARTICLES) {
         const char *item_start = strstr(pos, open_exact);
         const char *item_start_attr = strstr(pos, open_attr);
-
         if (!item_start && !item_start_attr) break;
-        if (item_start && item_start_attr) {
+        if (item_start && item_start_attr)
             item_start = (item_start < item_start_attr) ? item_start : item_start_attr;
-        } else if (!item_start) {
-            item_start = item_start_attr;
-        }
-
+        else if (!item_start) item_start = item_start_attr;
         const char *item_end = strstr(item_start, close_tag);
         if (!item_end) break;
         item_end += strlen(close_tag);
-
         size_t item_len = (size_t)(item_end - item_start);
         char *item_buf = malloc(item_len + 1);
         if (!item_buf) break;
         memcpy(item_buf, item_start, item_len);
         item_buf[item_len] = '\0';
-
         article_t *art = &g_articles[g_article_count];
-        art->title[0] = '\0';
-        art->link[0] = '\0';
-        art->description[0] = '\0';
-        art->pub_date[0] = '\0';
-        art->domain[0] = '\0';
-
+        memset(art, 0, sizeof(*art));
         extract_tag(item_buf, "title", art->title, MAX_TITLE);
-
+        if (is_atom) extract_atom_link(item_buf, art->link, MAX_URL);
+        else extract_tag(item_buf, "link", art->link, MAX_URL);
         if (is_atom) {
-            extract_atom_link(item_buf, art->link, MAX_URL);
-        } else {
-            extract_tag(item_buf, "link", art->link, MAX_URL);
-        }
-
-        if (is_atom) {
-            if (!extract_tag(item_buf, "summary", art->description, MAX_DESC)) {
+            if (!extract_tag(item_buf, "summary", art->description, MAX_DESC))
                 extract_tag(item_buf, "content", art->description, MAX_DESC);
-            }
         } else {
             extract_tag(item_buf, "description", art->description, MAX_DESC);
         }
-
         char raw_date[256] = {0};
         if (is_atom) {
-            if (!extract_tag(item_buf, "published", raw_date, sizeof(raw_date))) {
+            if (!extract_tag(item_buf, "published", raw_date, sizeof(raw_date)))
                 extract_tag(item_buf, "updated", raw_date, sizeof(raw_date));
-            }
         } else {
             extract_tag(item_buf, "pubDate", raw_date, sizeof(raw_date));
         }
-
         free(item_buf);
-
-        decode_xml_entities(art->title);
-        strip_html_tags(art->title);
-        trim_inplace(art->title);
-
-        decode_xml_entities(art->description);
-        strip_html_tags(art->description);
-        trim_inplace(art->description);
-
-        decode_xml_entities(art->link);
+        decode_xml_entities(art->title); strip_html_tags(art->title);
+        decode_xml_entities(art->title); trim_inplace(art->title);
+        decode_xml_entities(art->description); strip_html_tags(art->description);
+        decode_xml_entities(art->description); trim_inplace(art->description);
+        decode_xml_entities(art->link); decode_xml_entities(art->link);
         trim_inplace(art->link);
-
         parse_date(raw_date, art->pub_date, MAX_DATE);
         extract_domain(art->link, art->domain, MAX_DOMAIN);
-
         if (art->title[0] != '\0') {
             ap_log("  Article %d: %s [%s] (%s)",
                    g_article_count, art->title, art->domain, art->pub_date);
             g_article_count++;
         }
-
         pos = item_end;
     }
-
     ap_log("Parsed %d article(s) (%s)", g_article_count, is_atom ? "Atom" : "RSS");
     return g_article_count;
 }
 
 /* -----------------------------------------------------------------------
- * Fetch + parse with loading indicator
+ * Fetch + parse with caching
  * ----------------------------------------------------------------------- */
 
-static int fetch_and_parse(const feed_t *feed) {
+static int load_from_cache_and_parse(const feed_t *feed) {
+    if (feed->url[0] == '\0') return -1;
+    char *xml = load_from_cache(feed->url);
+    if (!xml) return -1;
+    int count = parse_feed_xml(xml);
+    free(xml);
+    return count;
+}
+
+static int fetch_cache_and_parse(const feed_t *feed) {
     if (feed->url[0] == '\0') {
-        ap_log("fetch_and_parse: no URL for feed '%s'", feed->label);
+        ap_log("fetch_cache_and_parse: no URL for feed '%s'", feed->label);
         return -1;
     }
-
     ap_log("Fetching feed: %s [%s]", feed->label, feed->url);
-
     fetch_task_t task;
     task.url = feed->url;
-    task.buf.data = NULL;
-    task.buf.size = 0;
-    task.buf.capacity = 0;
+    task.buf.data = NULL; task.buf.size = 0; task.buf.capacity = 0;
     task.result = -1;
-
     char msg[256];
     snprintf(msg, sizeof(msg), "Fetching %s...", feed->label);
-
-    ap_process_opts proc = {.message = msg,.show_progress = false,
-    };
-
+    ap_process_opts proc = {.message = msg,.show_progress = false };
     ap_process_message(&proc, fetch_worker, &task);
-
-    if (task.result != 0) {
-        return -1;
-    }
-
+    if (task.result != 0) return -1;
+    save_to_cache(feed->url, task.buf.data, task.buf.size);
     int count = parse_feed_xml(task.buf.data);
     free(task.buf.data);
     return count;
+}
+
+static int open_feed(const feed_t *feed) {
+    int count = load_from_cache_and_parse(feed);
+    if (count > 0) {
+        ap_log("Loaded %d articles from cache for '%s'", count, feed->label);
+        return count;
+    }
+    return fetch_cache_and_parse(feed);
 }
 
 /* -----------------------------------------------------------------------
@@ -650,98 +776,272 @@ static void add_feed(void) {
     ap_keyboard_result name_result;
     int rc = ap_keyboard("", "Step 1/2: Feed name  |  Y: Cancel", AP_KB_GENERAL, &name_result);
     if (rc != AP_OK || name_result.text[0] == '\0') return;
-
     const char *shortcuts[] = { "https://", ".com", ".org", "/rss", "/feed", "/atom.xml" };
-    ap_url_keyboard_config url_cfg = {.shortcut_keys  = shortcuts,.shortcut_count = 6,
-    };
+    ap_url_keyboard_config url_cfg = {.shortcut_keys = shortcuts,.shortcut_count = 6 };
     ap_keyboard_result url_result;
     rc = ap_url_keyboard("https://", "Step 2/2: Feed URL  |  Y: Cancel", &url_cfg, &url_result);
     if (rc != AP_OK || url_result.text[0] == '\0') return;
-
     if (g_feed_count >= MAX_FEEDS) {
-        ap_footer_item footer[] = {
-            {.button = AP_BTN_A,.label = "OK",.is_confirm = true },
-        };
-        ap_message_opts msg = {.message      = "Maximum number of feeds reached.",.footer       = footer,.footer_count = 1,
-        };
+        ap_footer_item footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
+        ap_message_opts msg = {.message = "Maximum number of feeds reached.",.footer = footer,.footer_count = 1 };
         ap_confirm_result cr;
         ap_confirmation(&msg, &cr);
         return;
     }
-
     strncpy(g_feeds[g_feed_count].label, name_result.text, MAX_LABEL - 1);
     strncpy(g_feeds[g_feed_count].url, url_result.text, MAX_URL - 1);
     trim_inplace(g_feeds[g_feed_count].label);
     trim_inplace(g_feeds[g_feed_count].url);
+    g_feeds[g_feed_count].cached_article_count = -1;
     g_feed_count++;
-
-    ap_log("Added feed: %s [%s]", g_feeds[g_feed_count - 1].label,
-           g_feeds[g_feed_count - 1].url);
-
+    ap_log("Added feed: %s [%s]", g_feeds[g_feed_count - 1].label, g_feeds[g_feed_count - 1].url);
     save_feeds(g_feeds_path);
 }
 
 static void edit_feed(int index) {
     if (index < 0 || index >= g_feed_count) return;
-
-    /* Edit name — pre-fill with current name */
     ap_keyboard_result name_result;
-    int rc = ap_keyboard(g_feeds[index].label,
-                         "Edit feed name  |  Y: Cancel",
-                         AP_KB_GENERAL, &name_result);
+    int rc = ap_keyboard(g_feeds[index].label, "Edit feed name  |  Y: Cancel", AP_KB_GENERAL, &name_result);
     if (rc != AP_OK) return;
-
-    /* Edit URL — pre-fill with current URL */
     const char *shortcuts[] = { "https://", ".com", ".org", "/rss", "/feed", "/atom.xml" };
-    ap_url_keyboard_config url_cfg = {.shortcut_keys  = shortcuts,.shortcut_count = 6,
-    };
+    ap_url_keyboard_config url_cfg = {.shortcut_keys = shortcuts,.shortcut_count = 6 };
     ap_keyboard_result url_result;
-    rc = ap_url_keyboard(g_feeds[index].url,
-                         "Edit feed URL  |  Y: Cancel",
-                         &url_cfg, &url_result);
+    rc = ap_url_keyboard(g_feeds[index].url, "Edit feed URL  |  Y: Cancel", &url_cfg, &url_result);
     if (rc != AP_OK) return;
-
-    /* Update only if user confirmed (Start) on both screens */
     if (name_result.text[0] != '\0') {
         strncpy(g_feeds[index].label, name_result.text, MAX_LABEL - 1);
         trim_inplace(g_feeds[index].label);
     }
     strncpy(g_feeds[index].url, url_result.text, MAX_URL - 1);
     trim_inplace(g_feeds[index].url);
-
     ap_log("Edited feed %d: %s [%s]", index, g_feeds[index].label, g_feeds[index].url);
-
     save_feeds(g_feeds_path);
 }
 
 static int delete_feed(int index) {
     if (index < 0 || index >= g_feed_count) return 0;
-
     char msg[256];
     snprintf(msg, sizeof(msg), "Delete \"%s\"?", g_feeds[index].label);
-
     ap_footer_item footer[] = {
         {.button = AP_BTN_B,.label = "CANCEL" },
         {.button = AP_BTN_A,.label = "DELETE",.is_confirm = true },
     };
-    ap_message_opts conf = {.message      = msg,.footer       = footer,.footer_count = 2,
-    };
+    ap_message_opts conf = {.message = msg,.footer = footer,.footer_count = 2 };
     ap_confirm_result cr;
     ap_confirmation(&conf, &cr);
-
     if (cr.confirmed) {
         ap_log("Deleted feed: %s", g_feeds[index].label);
-
-        for (int i = index; i < g_feed_count - 1; i++) {
+        clear_feed_cache(g_feeds[index].url);
+        for (int i = index; i < g_feed_count - 1; i++)
             g_feeds[i] = g_feeds[i + 1];
-        }
         g_feed_count--;
-
         save_feeds(g_feeds_path);
         return 1;
     }
-
     return 0;
+}
+
+static void move_feed(int index, int direction) {
+    int new_index = index + direction;
+    if (new_index < 0 || new_index >= g_feed_count) return;
+    feed_t tmp = g_feeds[index];
+    g_feeds[index] = g_feeds[new_index];
+    g_feeds[new_index] = tmp;
+    save_feeds(g_feeds_path);
+    ap_log("Moved feed '%s' from %d to %d", g_feeds[new_index].label, index, new_index);
+}
+
+/* -----------------------------------------------------------------------
+ * About screen
+ * ----------------------------------------------------------------------- */
+
+static void show_about(void) {
+    ap_detail_info_pair info[] = {
+        {.key = "Version",.value = NEXTFEED_VERSION },
+        {.key = "Platform",.value = AP_PLATFORM_NAME },
+        {.key = "UI Toolkit",.value = "Apostrophe" },
+        {.key = "License",.value = "MIT" },
+    };
+    ap_detail_section sections[] = {
+        {.type = AP_SECTION_INFO,.title = "NextFeed",.info_pairs = info,.info_count = 4,
+        },
+        {.type = AP_SECTION_DESCRIPTION,.title = "About",.description = "An RSS/Atom feed reader for NextUI on TrimUI "
+                           "handheld devices. Browse headlines from your "
+                           "favorite feeds directly on your device.\n\n"
+                           "Feeds are cached locally for offline reading "
+                           "and auto-refreshed when older than one hour.",
+        },
+        {.type = AP_SECTION_DESCRIPTION,.title = "Credits",.description = "NextFeed by Eric Reinsmidt\n\n"
+                           "Built with Apostrophe by Helaas\n"
+                           "For NextUI by LoveRetro",
+        },
+    };
+    ap_footer_item footer[] = {{.button = AP_BTN_B,.label = "BACK" }};
+    ap_detail_opts opts = {.title = "About NextFeed",.sections = sections,.section_count = 3,.footer = footer,.footer_count = 1,.status_bar = &g_status_bar,
+    };
+    ap_detail_result result;
+    ap_detail_screen(&opts, &result);
+}
+
+/* -----------------------------------------------------------------------
+ * Color settings screen
+ * ----------------------------------------------------------------------- */
+
+static void show_color_settings(void) {
+    while (1) {
+        char bg_label[64], text_label[64], hint_label[64];
+        snprintf(bg_label, sizeof(bg_label), "Background");
+        snprintf(text_label, sizeof(text_label), "Text");
+        snprintf(hint_label, sizeof(hint_label), "Hint");
+
+        ap_selection_option options[] = {
+            {.label = bg_label,.value = NULL },
+            {.label = text_label,.value = NULL },
+            {.label = hint_label,.value = NULL },
+            {.label = "Reset Defaults",.value = NULL },
+        };
+
+        ap_footer_item footer[] = {
+            {.button = AP_BTN_B,.label = "BACK" },
+            {.button = AP_BTN_A,.label = "SELECT",.is_confirm = true },
+        };
+
+        ap_selection_result result;
+        int rc = ap_selection("Colors", options, 4, footer, 2, &result);
+        if (rc != AP_OK) return;
+
+        ap_color picked;
+        switch (result.selected_index) {
+            case 0:
+                if (ap_color_picker(g_settings.bg_color, &picked) == AP_OK) {
+                    g_settings.bg_color = picked;
+                    settings_apply(); settings_save();
+                }
+                break;
+            case 1:
+                if (ap_color_picker(g_settings.text_color, &picked) == AP_OK) {
+                    g_settings.text_color = picked;
+                    settings_apply(); settings_save();
+                }
+                break;
+            case 2:
+                if (ap_color_picker(g_settings.hint_color, &picked) == AP_OK) {
+                    g_settings.hint_color = picked;
+                    settings_apply(); settings_save();
+                }
+                break;
+            case 3:
+                settings_set_defaults();
+                settings_apply(); settings_save();
+                {
+                    ap_footer_item ok_footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
+                    ap_message_opts msg = {.message = "Colors reset to defaults.",.footer = ok_footer,.footer_count = 1 };
+                    ap_confirm_result cr;
+                    ap_confirmation(&msg, &cr);
+                }
+                break;
+        }
+    }
+}
+
+/* -----------------------------------------------------------------------
+ * Manage feed menu
+ * ----------------------------------------------------------------------- */
+
+static void manage_feed(int index, int *new_index) {
+    if (index < 0 || index >= g_feed_count) return;
+    *new_index = index;
+
+    char title[256];
+    snprintf(title, sizeof(title), "Manage: %s", g_feeds[index].label);
+
+    int option_count = 4;
+    ap_selection_option options[5];
+    options[0] = (ap_selection_option){.label = "Edit",.value = NULL };
+    options[1] = (ap_selection_option){.label = "Delete",.value = NULL };
+    options[2] = (ap_selection_option){.label = "Move \xe2\x86\x91",.value = NULL };
+    options[3] = (ap_selection_option){.label = "Move \xe2\x86\x93",.value = NULL };
+
+    if (cache_exists(g_feeds[index].url)) {
+        options[4] = (ap_selection_option){.label = "Clear",.value = NULL };
+        option_count = 5;
+    }
+
+    ap_footer_item footer[] = {
+        {.button = AP_BTN_B,.label = "CANCEL" },
+        {.button = AP_BTN_A,.label = "SELECT",.is_confirm = true },
+    };
+
+    ap_selection_result result;
+    int rc = ap_selection(title, options, option_count, footer, 2, &result);
+    if (rc != AP_OK) return;
+
+    switch (result.selected_index) {
+        case 0: edit_feed(index); break;
+        case 1:
+            if (delete_feed(index)) {
+                if (*new_index >= g_feed_count && g_feed_count > 0)
+                    *new_index = g_feed_count - 1;
+            }
+            break;
+        case 2:
+            if (index > 0) { move_feed(index, -1); *new_index = index - 1; }
+            break;
+        case 3:
+            if (index < g_feed_count - 1) { move_feed(index, 1); *new_index = index + 1; }
+            break;
+        case 4:
+            clear_feed_cache(g_feeds[index].url);
+            g_feeds[index].cached_article_count = -1;
+            {
+                ap_footer_item ok_footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
+                ap_message_opts msg = {.message = "Cache cleared.",.footer = ok_footer,.footer_count = 1 };
+                ap_confirm_result cr;
+                ap_confirmation(&msg, &cr);
+            }
+            break;
+    }
+}
+
+/* -----------------------------------------------------------------------
+ * Main menu (Y button)
+ * ----------------------------------------------------------------------- */
+
+static void show_menu(int feed_index, int *new_index) {
+    *new_index = feed_index;
+
+    ap_list_item items[] = {
+        {.label = "Manage Feed" },
+        {.label = "Colors" },
+        {.label = "About" },
+    };
+
+    ap_footer_item footer[] = {
+        {.button = AP_BTN_B,.label = "BACK" },
+        {.button = AP_BTN_A,.label = "SELECT",.is_confirm = true },
+    };
+
+    ap_list_opts opts = ap_list_default_opts("Menu", items, 3);
+    opts.footer = footer;
+    opts.footer_count = 2;
+    opts.status_bar = &g_status_bar;
+
+    ap_list_result result;
+    int rc = ap_list(&opts, &result);
+    if (rc != AP_OK || result.selected_index < 0) return;
+
+    switch (result.selected_index) {
+        case 0:
+            if (feed_index >= 0 && feed_index < g_feed_count)
+                manage_feed(feed_index, new_index);
+            break;
+        case 1:
+            show_color_settings();
+            break;
+        case 2:
+            show_about();
+            break;
+    }
 }
 
 /* -----------------------------------------------------------------------
@@ -750,136 +1050,91 @@ static int delete_feed(int index) {
 
 static int show_article_detail(int article_idx) {
     article_t *art = &g_articles[article_idx];
-
     ap_detail_info_pair info[2];
     int info_count = 0;
-
-    if (art->domain[0]) {
-        info[info_count].key   = "Source";
-        info[info_count].value = art->domain;
-        info_count++;
-    }
-
-    if (art->pub_date[0]) {
-        info[info_count].key   = "Published";
-        info[info_count].value = art->pub_date;
-        info_count++;
-    }
-
+    if (art->domain[0]) { info[info_count].key = "Source"; info[info_count].value = art->domain; info_count++; }
+    if (art->pub_date[0]) { info[info_count].key = "Published"; info[info_count].value = art->pub_date; info_count++; }
     ap_detail_section sections[2];
     int section_count = 0;
-
     if (info_count > 0) {
         memset(&sections[section_count], 0, sizeof(sections[section_count]));
-        sections[section_count].type       = AP_SECTION_INFO;
-        sections[section_count].title      = NULL;
+        sections[section_count].type = AP_SECTION_INFO;
         sections[section_count].info_pairs = info;
         sections[section_count].info_count = info_count;
         section_count++;
     }
-
     if (is_useful_description(art->description)) {
         memset(&sections[section_count], 0, sizeof(sections[section_count]));
-        sections[section_count].type        = AP_SECTION_DESCRIPTION;
-        sections[section_count].title       = NULL;
+        sections[section_count].type = AP_SECTION_DESCRIPTION;
         sections[section_count].description = art->description;
         section_count++;
     }
-
     if (section_count == 0) {
         memset(&sections[0], 0, sizeof(sections[0]));
-        sections[0].type        = AP_SECTION_DESCRIPTION;
-        sections[0].title       = NULL;
+        sections[0].type = AP_SECTION_DESCRIPTION;
         sections[0].description = "(No additional details available)";
         section_count = 1;
     }
-
-    ap_footer_item footer[] = {
-        {.button = AP_BTN_B,.label = "BACK" },
+    ap_footer_item footer[] = {{.button = AP_BTN_B,.label = "BACK" }};
+    ap_detail_opts opts = {.title = art->title,.sections = sections,.section_count = section_count,.footer = footer,.footer_count = 1,.status_bar = &g_status_bar,
     };
-
-    ap_detail_opts opts = {.title         = art->title,.sections      = sections,.section_count = section_count,.footer        = footer,.footer_count  = 1,
-    };
-
     ap_detail_result result;
     ap_detail_screen(&opts, &result);
-
     return 0;
 }
 
 static int show_article_list(int feed_idx) {
-    int count = fetch_and_parse(&g_feeds[feed_idx]);
-
+    int count = open_feed(&g_feeds[feed_idx]);
     if (count <= 0) {
         char msg_text[256];
         snprintf(msg_text, sizeof(msg_text),
                  "Could not load articles from:\n%s\n\nCheck WiFi and try again.",
                  g_feeds[feed_idx].url[0] ? g_feeds[feed_idx].url : "(no URL)");
-
-        ap_footer_item footer[] = {
-            {.button = AP_BTN_A,.label = "OK",.is_confirm = true },
-        };
-        ap_message_opts msg = {.message      = msg_text,.footer       = footer,.footer_count = 1,
-        };
+        ap_footer_item footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
+        ap_message_opts msg = {.message = msg_text,.footer = footer,.footer_count = 1 };
         ap_confirm_result cr;
         ap_confirmation(&msg, &cr);
         return 0;
     }
-
+    g_feeds[feed_idx].cached_article_count = g_article_count;
     ap_list_item items[MAX_ARTICLES];
     for (int i = 0; i < g_article_count; i++) {
         memset(&items[i], 0, sizeof(items[i]));
         items[i].label = g_articles[i].title;
-        items[i].metadata = NULL;
     }
-
     ap_footer_item footer[] = {
         {.button = AP_BTN_B,.label = "BACK" },
         {.button = AP_BTN_X,.label = "REFRESH" },
         {.button = AP_BTN_A,.label = "READ",.is_confirm = true },
     };
-
-    int last_index = 0;
-    int last_visible = 0;
-
+    int last_index = 0, last_visible = 0;
     while (1) {
-        ap_list_opts opts = ap_list_default_opts(
-            g_feeds[feed_idx].label, items, g_article_count);
-        opts.footer                  = footer;
-        opts.footer_count            = 3;
-        opts.initial_index           = last_index;
-        opts.visible_start_index     = last_visible;
+        ap_list_opts opts = ap_list_default_opts(g_feeds[feed_idx].label, items, g_article_count);
+        opts.footer = footer; opts.footer_count = 3;
+        opts.initial_index = last_index; opts.visible_start_index = last_visible;
         opts.secondary_action_button = AP_BTN_X;
-
+        opts.status_bar = &g_status_bar;
         ap_list_result result;
         int rc = ap_list(&opts, &result);
         last_visible = result.visible_start_index;
-
-        if (rc != AP_OK || result.action == AP_ACTION_BACK) {
-            return 0;
-        }
-
+        if (rc != AP_OK || result.action == AP_ACTION_BACK) return 0;
         if (result.action == AP_ACTION_SECONDARY_TRIGGERED) {
             last_index = result.selected_index >= 0 ? result.selected_index : 0;
-            count = fetch_and_parse(&g_feeds[feed_idx]);
+            count = fetch_cache_and_parse(&g_feeds[feed_idx]);
             if (count <= 0) {
-                ap_footer_item err_footer[] = {
-                    {.button = AP_BTN_A,.label = "OK",.is_confirm = true },
-                };
-                ap_message_opts msg = {.message      = "Refresh failed.\nCheck WiFi and try again.",.footer       = err_footer,.footer_count = 1,
-                };
+                ap_footer_item err_footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
+                ap_message_opts msg = {.message = "Refresh failed.\nCheck WiFi and try again.",.footer = err_footer,.footer_count = 1 };
                 ap_confirm_result cr;
                 ap_confirmation(&msg, &cr);
                 return 0;
             }
+            g_feeds[feed_idx].cached_article_count = g_article_count;
             for (int i = 0; i < g_article_count; i++) {
                 memset(&items[i], 0, sizeof(items[i]));
                 items[i].label = g_articles[i].title;
-                items[i].metadata = NULL;
             }
             continue;
         }
-
         if (result.selected_index >= 0) {
             last_index = result.selected_index;
             show_article_detail(result.selected_index);
@@ -887,86 +1142,55 @@ static int show_article_list(int feed_idx) {
     }
 }
 
-static void manage_feed(int index) {
-    if (index < 0 || index >= g_feed_count) return;
-
-    char title[256];
-    snprintf(title, sizeof(title), "Manage: %s", g_feeds[index].label);
-
-    ap_selection_option options[] = {
-        {.label = "Edit",.value = NULL },
-        {.label = "Delete",.value = NULL },
-    };
-
-    ap_footer_item footer[] = {
-        {.button = AP_BTN_B,.label = "CANCEL" },
-        {.button = AP_BTN_A,.label = "SELECT",.is_confirm = true },
-    };
-
-    ap_selection_result result;
-    int rc = ap_selection(title, options, 2, footer, 2, &result);
-
-    if (rc != AP_OK) return;
-
-    if (result.selected_index == 0) {
-        edit_feed(index);
-    } else if (result.selected_index == 1) {
-        delete_feed(index);
-    }
-}
-
 static int show_feed_list(void) {
     while (1) {
         ap_list_item items[MAX_FEEDS];
+        static char feed_labels[MAX_FEEDS][MAX_LABEL + 16];
         for (int i = 0; i < g_feed_count; i++) {
             memset(&items[i], 0, sizeof(items[i]));
-            items[i].label = g_feeds[i].label;
-            items[i].metadata = NULL;
+            int cnt = g_feeds[i].cached_article_count;
+            if (cnt > 0)
+                snprintf(feed_labels[i], sizeof(feed_labels[i]), "%s (%d)", g_feeds[i].label, cnt);
+            else
+                snprintf(feed_labels[i], sizeof(feed_labels[i]), "%s", g_feeds[i].label);
+            items[i].label = feed_labels[i];
         }
 
         ap_footer_item footer[] = {
             {.button = AP_BTN_B,.label = "QUIT" },
             {.button = AP_BTN_X,.label = "ADD" },
-            {.button = AP_BTN_SELECT,.label = "MANAGE" },
+            {.button = AP_BTN_Y,.label = "MENU" },
             {.button = AP_BTN_A,.label = "OPEN",.is_confirm = true },
         };
 
-        static int last_index = 0;
-        static int last_visible = 0;
+        static int last_index = 0, last_visible = 0;
 
         ap_list_opts opts = ap_list_default_opts("NextFeed", items, g_feed_count);
-        opts.footer                  = footer;
-        opts.footer_count            = 4;
-        opts.initial_index           = last_index;
-        opts.visible_start_index     = last_visible;
+        opts.footer = footer; opts.footer_count = 4;
+        opts.initial_index = last_index; opts.visible_start_index = last_visible;
         opts.secondary_action_button = AP_BTN_X;
-        opts.action_button           = AP_BTN_SELECT;
+        opts.tertiary_action_button = AP_BTN_Y;
+        opts.status_bar = &g_status_bar;
 
         ap_list_result result;
         int rc = ap_list(&opts, &result);
         last_visible = result.visible_start_index;
 
-        if (rc != AP_OK || result.action == AP_ACTION_BACK) {
-            return 0;
-        }
+        if (rc != AP_OK || result.action == AP_ACTION_BACK) return 0;
 
         /* X — add feed */
         if (result.action == AP_ACTION_SECONDARY_TRIGGERED) {
             last_index = result.selected_index >= 0 ? result.selected_index : 0;
             add_feed();
+            update_article_counts();
             continue;
         }
-
-        /* Select — manage feed (edit/delete) */
-        if (result.action == AP_ACTION_TRIGGERED && result.selected_index >= 0) {
-            last_index = result.selected_index;
-            manage_feed(result.selected_index);
-            if (last_index >= g_feed_count && g_feed_count > 0) {
-                last_index = g_feed_count - 1;
-            }
+        /* Y — menu */
+        if (result.action == AP_ACTION_TERTIARY_TRIGGERED) {
+            last_index = result.selected_index >= 0 ? result.selected_index : 0;
+            show_menu(last_index, &last_index);
             continue;
         }
-
         /* A — open feed */
         if (result.selected_index >= 0) {
             last_index = result.selected_index;
@@ -984,6 +1208,14 @@ int main(int argc, char *argv[]) {
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
+    const char *cache_env = getenv("NEXTFEED_CACHE_DIR");
+    if (cache_env) strncpy(g_cache_dir, cache_env, sizeof(g_cache_dir) - 1);
+
+    const char *config_env = getenv("NEXTFEED_CONFIG_DIR");
+    if (config_env) strncpy(g_config_dir, config_env, sizeof(g_config_dir) - 1);
+
+    settings_load();
+
     ap_config cfg = {.window_title       = "NextFeed",.log_path           = ap_resolve_log_path("nextfeed"),.is_nextui          = AP_PLATFORM_IS_DEVICE,.disable_background = true,
     };
     if (ap_init(&cfg) != AP_OK) {
@@ -991,7 +1223,12 @@ int main(int argc, char *argv[]) {
         curl_global_cleanup();
         return 1;
     }
-    ap_log("=== NextFeed starting ===");
+
+    settings_apply();
+
+    ap_log("=== NextFeed v%s starting ===", NEXTFEED_VERSION);
+    ap_log("Cache dir: %s", g_cache_dir[0] ? g_cache_dir : "(none)");
+    ap_log("Config dir: %s", g_config_dir[0] ? g_config_dir : "(none)");
 
     const char *feeds_path = resolve_feeds_path();
     load_feeds(feeds_path);
@@ -1002,15 +1239,15 @@ int main(int argc, char *argv[]) {
             {.button = AP_BTN_B,.label = "QUIT" },
             {.button = AP_BTN_X,.label = "ADD FEED" },
         };
-        ap_message_opts msg = {.message      = "No feeds configured.\nPress X to add a feed.",.image_path   = NULL,.footer       = err_footer,.footer_count = 2,
+        ap_message_opts msg = {.message = "No feeds configured.\nPress X to add a feed.",.image_path = NULL,.footer = err_footer,.footer_count = 2,
         };
         ap_confirm_result cr;
         ap_confirmation(&msg, &cr);
-
-        if (!cr.confirmed) {
-            add_feed();
-        }
+        if (!cr.confirmed) add_feed();
     }
+
+    if (g_feed_count > 0) auto_refresh_feeds();
+    update_article_counts();
 
     show_feed_list();
 

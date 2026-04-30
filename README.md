@@ -21,8 +21,6 @@ Browse headlines from your favorite feeds directly on your TrimUI Brick or Smart
 |--------|----------|--------|
 | TrimUI Brick | tg5040 | Working |
 | TrimUI Smart Pro | tg5040 | Working |
-| TrimUI Smart Pro S | tg5050 | Planned |
-| Miyoo Flip | my355 | Planned |
 
 ## Screenshots
 

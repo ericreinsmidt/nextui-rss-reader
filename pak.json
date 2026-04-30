@@ -1,18 +1,39 @@
 {
   "name": "NextFeed",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "TOOL",
   "description": "Offline-friendly RSS and Atom reader for NextUI devices.",
-  "author": "Eric",
-  "repo_url": "https://github.com/YOUR_USERNAME/nextui-rss-reader",
-  "release_filename": "NextFeed.v0.1.0.zip",
+  "author": "Eric Reinsmidt",
+  "repo_url": "https://github.com/ericreinsmidt/nextui-rss-reader",
+  "release_filename": "NextFeed.tg5040.pak.zip",
   "platforms": ["tg5040"],
   "changelog": {
     "0.1.0": [
-      "Initial project skeleton",
-      "Pak launcher and persistent state setup",
-      "Ready for MVP development"
+      "RSS 2.0 and Atom feed parsing",
+      "HTTP fetch via libcurl with HTTPS (bundled CA certs)",
+      "Article detail with source domain, publish date, smart description filtering",
+      "Refresh button (X) on article list",
+      "Native NextUI look via Apostrophe with disabled wallpaper background"
+    ],
+    "0.2.0": [
+      "Disk caching of raw XML per feed",
+      "Auto-refresh on launch (feeds older than 1 hour)",
+      "Article count shown next to feed names",
+      "Feed management: add, edit, delete, reorder",
+      "Clear cache per feed",
+      "Double-decode XML entities for Reddit compatibility",
+      "Generic numeric entity decoder",
+      "Loading indicators during fetches",
+      "Status bar with clock, battery, WiFi",
+      "Color settings with color picker",
+      "Persistent settings",
+      "About screen",
+      "Menu system via Y button"
     ]
   },
-  "screenshots": []
+  "screenshots": [
+    "assets/screenshots/main.png",
+    "assets/screenshots/list.png",
+    "assets/screenshots/article.png"
+  ]
 }
