@@ -1,6 +1,6 @@
 {
   "name": "NextFeed",
-  "version": "0.2.0",
+  "version": "v0.2.0",
   "type": "TOOL",
   "description": "Offline-friendly RSS and Atom reader for NextUI devices.",
   "author": "Eric Reinsmidt",
