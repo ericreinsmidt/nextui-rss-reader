@@ -8,8 +8,8 @@
   "release_filename": "NextFeed.tg5040.pak.zip",
   "platforms": ["tg5040"],
   "changelog": {
-    "0.2.0": "Added caching of raw XML per feed, auto-refresh on launch, article count shown next to feed names, color picker and more.",
-    "0.1.0": "RSS 2.0 and Atom feed parsing,using Apostrophe for native NextUI look."
+    "v0.2.0": "Added caching of raw XML per feed, auto-refresh on launch, article count shown next to feed names, color picker and more.",
+    "v0.1.0": "RSS 2.0 and Atom feed parsing,using Apostrophe for native NextUI look."
   },
   "screenshots": [
     "assets/screenshots/main.png",
