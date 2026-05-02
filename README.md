@@ -1,6 +1,6 @@
 # NextFeed
 
-![NextFeed](assets/screenshots/logo.png)
+![NextFeed](assets/logo.png)
 
 An RSS/Atom feed reader for [NextUI](https://github.com/LoveRetro/NextUI) on TrimUI handheld devices.
 
@@ -34,11 +34,7 @@ Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](ht
 
 | Feed List | Article List | Article Detail |
 |-----------|-------------|----------------|
-| ![Feed List](assets/screenshots/main.png) | ![Article List](assets/screenshots/list.png) | ![Article Detail](assets/screenshots/article.png) |
-
-| Manage Feed | About |
-|-------------|-------|
-| ![Manage Feed](assets/screenshots/manage.png) | ![About](assets/screenshots/about.png) |
+| ![Feed List](assets/screenshots/feeds.png) | ![Article List](assets/screenshots/list.png) | ![Article Detail](assets/screenshots/article.png) |
 
 ## Installation
 

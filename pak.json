@@ -6,17 +6,17 @@
   "author": "Eric Reinsmidt",
   "repo_url": "https://github.com/ericreinsmidt/nextui-rss-reader",
   "release_filename": "NextFeed.tg5040.pak.zip",
-  "platforms": ["tg5040"],
+  "platforms": [
+    "tg5040"
+  ],
   "changelog": {
     "v0.3.0": "PakKit UI integration, custom on-screen keyboard with URL shortcuts, removed color settings, minimal text hints.",
     "v0.2.0": "Added caching of raw XML per feed, auto-refresh on launch, article count shown next to feed names, color picker and more.",
     "v0.1.0": "RSS 2.0 and Atom feed parsing, using Apostrophe for native NextUI look."
   },
   "screenshots": [
-    "assets/screenshots/main.png",
+    "assets/screenshots/feeds.png",
     "assets/screenshots/list.png",
-    "assets/screenshots/article.png",
-    "assets/screenshots/manage.png",
-    "assets/screenshots/about.png"
+    "assets/screenshots/article.png"
   ]
 }
