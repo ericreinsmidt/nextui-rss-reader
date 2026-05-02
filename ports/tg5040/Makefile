@@ -24,7 +24,7 @@ SRC        := $(WORKSPACE)/src/main.c
 AP_INCLUDE := $(WORKSPACE)/third_party/apostrophe/include
 DEPS       := $(AP_INCLUDE)/apostrophe.h $(AP_INCLUDE)/apostrophe_widgets.h
 
-CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
+CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation -Wno-stringop-truncation \
     -mcpu=cortex-a53 -mtune=cortex-a53 \
     -DPLATFORM_TG5040 \
     -I$(AP_INCLUDE) \
