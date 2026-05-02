@@ -1,5 +1,7 @@
 # NextFeed
 
+![NextFeed](assets/screenshots/logo.png)
+
 An RSS/Atom feed reader for [NextUI](https://github.com/LoveRetro/NextUI) on TrimUI handheld devices.
 
 Browse headlines from your favorite feeds directly on your TrimUI Brick or Smart Pro.
