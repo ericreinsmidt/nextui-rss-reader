@@ -15,6 +15,7 @@
     "v0.1.0": "RSS 2.0 and Atom feed parsing, using Apostrophe for native NextUI look."
   },
   "screenshots": [
+    "assets/logo.png",
     "assets/screenshots/feeds.png",
     "assets/screenshots/list.png",
     "assets/screenshots/article.png"
