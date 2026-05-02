@@ -1,12 +1,14 @@
 /*
  * NextFeed — RSS/Atom reader for NextUI
- * Apostrophe UI + libcurl + RSS/Atom parsing + caching + settings.
+ * Apostrophe (low-level) + PakKit (UI components) + libcurl + RSS/Atom parsing.
  */
 
 #define AP_IMPLEMENTATION
 #include "apostrophe.h"
 #define AP_WIDGETS_IMPLEMENTATION
 #include "apostrophe_widgets.h"
+#define PAKKIT_UI_IMPLEMENTATION
+#include "pakkit_ui.h"
 
 #include <string.h>
 #include <curl/curl.h>
@@ -100,9 +102,6 @@ static char      g_cache_dir[MAX_PATH_LEN] = {0};
 static char      g_config_dir[MAX_PATH_LEN] = {0};
 
 static app_settings_t g_settings;
-
-static ap_status_bar_opts g_status_bar = {.show_battery = true,.show_wifi    = true,
-};
 
 /* -----------------------------------------------------------------------
  * String helpers
@@ -782,10 +781,7 @@ static void add_feed(void) {
     rc = ap_url_keyboard("https://", "Step 2/2: Feed URL  |  Y: Cancel", &url_cfg, &url_result);
     if (rc != AP_OK || url_result.text[0] == '\0') return;
     if (g_feed_count >= MAX_FEEDS) {
-        ap_footer_item footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
-        ap_message_opts msg = {.message = "Maximum number of feeds reached.",.footer = footer,.footer_count = 1 };
-        ap_confirm_result cr;
-        ap_confirmation(&msg, &cr);
+        pakkit_message("Maximum number of feeds reached.", "OK");
         return;
     }
     strncpy(g_feeds[g_feed_count].label, name_result.text, MAX_LABEL - 1);
@@ -822,14 +818,7 @@ static int delete_feed(int index) {
     if (index < 0 || index >= g_feed_count) return 0;
     char msg[256];
     snprintf(msg, sizeof(msg), "Delete \"%s\"?", g_feeds[index].label);
-    ap_footer_item footer[] = {
-        {.button = AP_BTN_B,.label = "CANCEL" },
-        {.button = AP_BTN_A,.label = "DELETE",.is_confirm = true },
-    };
-    ap_message_opts conf = {.message = msg,.footer = footer,.footer_count = 2 };
-    ap_confirm_result cr;
-    ap_confirmation(&conf, &cr);
-    if (cr.confirmed) {
+    if (pakkit_confirm(msg, "Delete", "Cancel")) {
         ap_log("Deleted feed: %s", g_feeds[index].label);
         clear_feed_cache(g_feeds[index].url);
         for (int i = index; i < g_feed_count - 1; i++)
@@ -856,31 +845,20 @@ static void move_feed(int index, int direction) {
  * ----------------------------------------------------------------------- */
 
 static void show_about(void) {
-    ap_detail_info_pair info[] = {
+    pakkit_info_pair info[] = {
         {.key = "Version",.value = NEXTFEED_VERSION },
         {.key = "Platform",.value = AP_PLATFORM_NAME },
-        {.key = "UI Toolkit",.value = "Apostrophe" },
+        {.key = "UI",.value = "PakKit + Apostrophe" },
         {.key = "License",.value = "MIT" },
     };
-    ap_detail_section sections[] = {
-        {.type = AP_SECTION_INFO,.title = "NextFeed",.info_pairs = info,.info_count = 4,
-        },
-        {.type = AP_SECTION_DESCRIPTION,.title = "About",.description = "An RSS/Atom feed reader for NextUI on TrimUI "
-                           "handheld devices. Browse headlines from your "
-                           "favorite feeds directly on your device.\n\n"
-                           "Feeds are cached locally for offline reading "
-                           "and auto-refreshed when older than one hour.",
-        },
-        {.type = AP_SECTION_DESCRIPTION,.title = "Credits",.description = "NextFeed by Eric Reinsmidt\n\n"
-                           "Built with Apostrophe by Helaas\n"
-                           "For NextUI by LoveRetro",
-        },
+    const char *credits[] = {
+        "NextFeed by Eric Reinsmidt",
+        "Built with PakKit + Apostrophe by Helaas",
+        "For NextUI by LoveRetro",
     };
-    ap_footer_item footer[] = {{.button = AP_BTN_B,.label = "BACK" }};
-    ap_detail_opts opts = {.title = "About NextFeed",.sections = sections,.section_count = 3,.footer = footer,.footer_count = 1,.status_bar = &g_status_bar,
+    pakkit_detail_opts opts = {.title        = "NextFeed",.subtitle     = "RSS/Atom reader for NextUI",.info         = info,.info_count   = 4,.credits      = credits,.credit_count = 3,
     };
-    ap_detail_result result;
-    ap_detail_screen(&opts, &result);
+    pakkit_detail_screen(&opts);
 }
 
 /* -----------------------------------------------------------------------
@@ -889,25 +867,14 @@ static void show_about(void) {
 
 static void show_color_settings(void) {
     while (1) {
-        char bg_label[64], text_label[64], hint_label[64];
-        snprintf(bg_label, sizeof(bg_label), "Background");
-        snprintf(text_label, sizeof(text_label), "Text");
-        snprintf(hint_label, sizeof(hint_label), "Hint");
-
-        ap_selection_option options[] = {
-            {.label = bg_label,.value = NULL },
-            {.label = text_label,.value = NULL },
-            {.label = hint_label,.value = NULL },
-            {.label = "Reset Defaults",.value = NULL },
+        pakkit_menu_item items[] = {
+            {.label = "Background" },
+            {.label = "Text" },
+            {.label = "Hint" },
+            {.label = "Reset Defaults" },
         };
-
-        ap_footer_item footer[] = {
-            {.button = AP_BTN_B,.label = "BACK" },
-            {.button = AP_BTN_A,.label = "SELECT",.is_confirm = true },
-        };
-
-        ap_selection_result result;
-        int rc = ap_selection("Colors", options, 4, footer, 2, &result);
+        pakkit_menu_result result;
+        int rc = pakkit_menu("Colors", items, 4, &result);
         if (rc != AP_OK) return;
 
         ap_color picked;
@@ -933,12 +900,7 @@ static void show_color_settings(void) {
             case 3:
                 settings_set_defaults();
                 settings_apply(); settings_save();
-                {
-                    ap_footer_item ok_footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
-                    ap_message_opts msg = {.message = "Colors reset to defaults.",.footer = ok_footer,.footer_count = 1 };
-                    ap_confirm_result cr;
-                    ap_confirmation(&msg, &cr);
-                }
+                pakkit_message("Colors reset to defaults.", "OK");
                 break;
         }
     }
@@ -955,25 +917,20 @@ static void manage_feed(int index, int *new_index) {
     char title[256];
     snprintf(title, sizeof(title), "Manage: %s", g_feeds[index].label);
 
-    int option_count = 4;
-    ap_selection_option options[5];
-    options[0] = (ap_selection_option){.label = "Edit",.value = NULL };
-    options[1] = (ap_selection_option){.label = "Delete",.value = NULL };
-    options[2] = (ap_selection_option){.label = "Move \xe2\x86\x91",.value = NULL };
-    options[3] = (ap_selection_option){.label = "Move \xe2\x86\x93",.value = NULL };
+    pakkit_menu_item items[5];
+    int item_count = 4;
+    items[0] = (pakkit_menu_item){.label = "Edit" };
+    items[1] = (pakkit_menu_item){.label = "Delete" };
+    items[2] = (pakkit_menu_item){.label = "Move Up" };
+    items[3] = (pakkit_menu_item){.label = "Move Down" };
 
     if (cache_exists(g_feeds[index].url)) {
-        options[4] = (ap_selection_option){.label = "Clear",.value = NULL };
-        option_count = 5;
+        items[4] = (pakkit_menu_item){.label = "Clear Cache" };
+        item_count = 5;
     }
 
-    ap_footer_item footer[] = {
-        {.button = AP_BTN_B,.label = "CANCEL" },
-        {.button = AP_BTN_A,.label = "SELECT",.is_confirm = true },
-    };
-
-    ap_selection_result result;
-    int rc = ap_selection(title, options, option_count, footer, 2, &result);
+    pakkit_menu_result result;
+    int rc = pakkit_menu(title, items, item_count, &result);
     if (rc != AP_OK) return;
 
     switch (result.selected_index) {
@@ -993,12 +950,7 @@ static void manage_feed(int index, int *new_index) {
         case 4:
             clear_feed_cache(g_feeds[index].url);
             g_feeds[index].cached_article_count = -1;
-            {
-                ap_footer_item ok_footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
-                ap_message_opts msg = {.message = "Cache cleared.",.footer = ok_footer,.footer_count = 1 };
-                ap_confirm_result cr;
-                ap_confirmation(&msg, &cr);
-            }
+            pakkit_message("Cache cleared.", "OK");
             break;
     }
 }
@@ -1010,25 +962,15 @@ static void manage_feed(int index, int *new_index) {
 static void show_menu(int feed_index, int *new_index) {
     *new_index = feed_index;
 
-    ap_list_item items[] = {
+    pakkit_menu_item items[] = {
         {.label = "Manage Feed" },
         {.label = "Colors" },
         {.label = "About" },
     };
 
-    ap_footer_item footer[] = {
-        {.button = AP_BTN_B,.label = "BACK" },
-        {.button = AP_BTN_A,.label = "SELECT",.is_confirm = true },
-    };
-
-    ap_list_opts opts = ap_list_default_opts("Menu", items, 3);
-    opts.footer = footer;
-    opts.footer_count = 2;
-    opts.status_bar = &g_status_bar;
-
-    ap_list_result result;
-    int rc = ap_list(&opts, &result);
-    if (rc != AP_OK || result.selected_index < 0) return;
+    pakkit_menu_result result;
+    int rc = pakkit_menu("Menu", items, 3, &result);
+    if (rc != AP_OK) return;
 
     switch (result.selected_index) {
         case 0:
@@ -1050,36 +992,122 @@ static void show_menu(int feed_index, int *new_index) {
 
 static int show_article_detail(int article_idx) {
     article_t *art = &g_articles[article_idx];
-    ap_detail_info_pair info[2];
-    int info_count = 0;
-    if (art->domain[0]) { info[info_count].key = "Source"; info[info_count].value = art->domain; info_count++; }
-    if (art->pub_date[0]) { info[info_count].key = "Published"; info[info_count].value = art->pub_date; info_count++; }
-    ap_detail_section sections[2];
-    int section_count = 0;
-    if (info_count > 0) {
-        memset(&sections[section_count], 0, sizeof(sections[section_count]));
-        sections[section_count].type = AP_SECTION_INFO;
-        sections[section_count].info_pairs = info;
-        sections[section_count].info_count = info_count;
-        section_count++;
+
+    /* Build subtitle from source and date */
+    char subtitle[256] = {0};
+    if (art->domain[0] && art->pub_date[0])
+        snprintf(subtitle, sizeof(subtitle), "%s  |  %s", art->domain, art->pub_date);
+    else if (art->domain[0])
+        snprintf(subtitle, sizeof(subtitle), "%s", art->domain);
+    else if (art->pub_date[0])
+        snprintf(subtitle, sizeof(subtitle), "%s", art->pub_date);
+
+    /*
+     * pakkit_detail_screen uses info pairs and credits, but for an article
+     * we really just want a scrollable text body. We repurpose credits
+     * for the description text since it renders as wrapped lines.
+     * For now, use info pairs for metadata and credits for description.
+     *
+     * Actually — pakkit_detail_screen doesn't have a free-text body section.
+     * We'll use a custom article detail screen drawn directly with Apostrophe
+     * primitives + pakkit_draw_hints, matching the PakKit visual style.
+     */
+    int running = 1;
+    int scroll_y = 0;
+
+    while (running) {
+        ap_input_event ev;
+        while (ap_poll_input(&ev)) {
+            if (ev.pressed) {
+                switch (ev.button) {
+                    case AP_BTN_B:
+                        if (!ev.repeated) running = 0;
+                        break;
+                    case AP_BTN_UP:
+                        if (scroll_y > 0) scroll_y -= PAKKIT_SCROLL_STEP;
+                        if (scroll_y < 0) scroll_y = 0;
+                        break;
+                    case AP_BTN_DOWN:
+                        scroll_y += PAKKIT_SCROLL_STEP;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        ap_clear_screen();
+        ap_draw_background();
+
+        int sw = ap_get_screen_width();
+        int sh = ap_get_screen_height();
+        int pad = AP_DS(5);
+
+        TTF_Font *font_large = ap_get_font(AP_FONT_LARGE);
+        TTF_Font *font_small = ap_get_font(AP_FONT_SMALL);
+        TTF_Font *font_tiny  = ap_get_font(AP_FONT_TINY);
+
+        ap_theme *theme = ap_get_theme();
+        ap_color text_color = theme->text;
+        ap_color hint_color = theme->hint;
+
+        int hint_font_h = TTF_FontHeight(font_tiny);
+        int footer_h = hint_font_h + pad * 2;
+        int content_top = pad;
+        int content_bottom = sh - footer_h;
+        int content_h = content_bottom - content_top;
+
+        SDL_Rect clip = { 0, content_top, sw, content_h };
+        SDL_RenderSetClipRect(ap__g.renderer, &clip);
+
+        int y = content_top - scroll_y;
+        int text_w = sw - pad * 6;
+
+        /* Title (wrapped) */
+        int title_h = ap_measure_wrapped_text_height(font_large, art->title, text_w);
+        ap_draw_text_wrapped(font_large, art->title, pad * 3, y, text_w,
+                             text_color, AP_ALIGN_LEFT);
+        y += title_h + pad;
+
+        /* Subtitle (source | date) */
+        if (subtitle[0]) {
+            ap_draw_text(font_small, subtitle, pad * 3, y, hint_color);
+            y += TTF_FontHeight(font_small) + pad * 3;
+        } else {
+            y += pad * 2;
+        }
+
+        /* Divider */
+        ap_draw_rect(pad * 3, y, sw - pad * 6, 1, hint_color);
+        y += pad * 3;
+
+        /* Description body */
+        if (is_useful_description(art->description)) {
+            int desc_h = ap_measure_wrapped_text_height(font_small, art->description, text_w);
+            ap_draw_text_wrapped(font_small, art->description, pad * 3, y, text_w,
+                                 text_color, AP_ALIGN_LEFT);
+            y += desc_h + pad * 2;
+        } else {
+            ap_draw_text(font_small, "(No additional details available)", pad * 3, y, hint_color);
+            y += TTF_FontHeight(font_small) + pad * 2;
+        }
+
+        /* Clamp scroll */
+        int total_content = y + scroll_y - content_top;
+        int max_scroll = total_content - content_h;
+        if (max_scroll < 0) max_scroll = 0;
+        if (scroll_y > max_scroll) scroll_y = max_scroll;
+
+        SDL_RenderSetClipRect(ap__g.renderer, NULL);
+
+        /* Hints */
+        pakkit_hint hints[] = {
+            {.button = "B",.label = "Back" },
+        };
+        pakkit_draw_hints(hints, 1);
+
+        ap_present();
     }
-    if (is_useful_description(art->description)) {
-        memset(&sections[section_count], 0, sizeof(sections[section_count]));
-        sections[section_count].type = AP_SECTION_DESCRIPTION;
-        sections[section_count].description = art->description;
-        section_count++;
-    }
-    if (section_count == 0) {
-        memset(&sections[0], 0, sizeof(sections[0]));
-        sections[0].type = AP_SECTION_DESCRIPTION;
-        sections[0].description = "(No additional details available)";
-        section_count = 1;
-    }
-    ap_footer_item footer[] = {{.button = AP_BTN_B,.label = "BACK" }};
-    ap_detail_opts opts = {.title = art->title,.sections = sections,.section_count = section_count,.footer = footer,.footer_count = 1,.status_bar = &g_status_bar,
-    };
-    ap_detail_result result;
-    ap_detail_screen(&opts, &result);
     return 0;
 }
 
@@ -1090,51 +1118,43 @@ static int show_article_list(int feed_idx) {
         snprintf(msg_text, sizeof(msg_text),
                  "Could not load articles from:\n%s\n\nCheck WiFi and try again.",
                  g_feeds[feed_idx].url[0] ? g_feeds[feed_idx].url : "(no URL)");
-        ap_footer_item footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
-        ap_message_opts msg = {.message = msg_text,.footer = footer,.footer_count = 1 };
-        ap_confirm_result cr;
-        ap_confirmation(&msg, &cr);
+        pakkit_message(msg_text, "OK");
         return 0;
     }
     g_feeds[feed_idx].cached_article_count = g_article_count;
-    ap_list_item items[MAX_ARTICLES];
-    for (int i = 0; i < g_article_count; i++) {
-        memset(&items[i], 0, sizeof(items[i]));
-        items[i].label = g_articles[i].title;
-    }
-    ap_footer_item footer[] = {
-        {.button = AP_BTN_B,.label = "BACK" },
-        {.button = AP_BTN_X,.label = "REFRESH" },
-        {.button = AP_BTN_A,.label = "READ",.is_confirm = true },
+
+    pakkit_list_item items[MAX_ARTICLES];
+    for (int i = 0; i < g_article_count; i++)
+        items[i] = (pakkit_list_item){.label = g_articles[i].title };
+
+    pakkit_hint hints[] = {
+        {.button = "B",.label = "Back" },
+        {.button = "X",.label = "Refresh" },
+        {.button = "A",.label = "Read" },
     };
-    int last_index = 0, last_visible = 0;
+
+    int last_index = 0;
     while (1) {
-        ap_list_opts opts = ap_list_default_opts(g_feeds[feed_idx].label, items, g_article_count);
-        opts.footer = footer; opts.footer_count = 3;
-        opts.initial_index = last_index; opts.visible_start_index = last_visible;
-        opts.secondary_action_button = AP_BTN_X;
-        opts.status_bar = &g_status_bar;
-        ap_list_result result;
-        int rc = ap_list(&opts, &result);
-        last_visible = result.visible_start_index;
-        if (rc != AP_OK || result.action == AP_ACTION_BACK) return 0;
-        if (result.action == AP_ACTION_SECONDARY_TRIGGERED) {
+        pakkit_list_opts opts = {.title            = g_feeds[feed_idx].label,.hints            = hints,.hint_count       = 3,.secondary_button = AP_BTN_X,.tertiary_button  = AP_BTN_NONE,.initial_index    = last_index,
+        };
+        pakkit_list_result result;
+        pakkit_list(&opts, items, g_article_count, &result);
+
+        if (result.action == PAKKIT_ACTION_BACK) return 0;
+
+        if (result.action == PAKKIT_ACTION_SECONDARY) {
             last_index = result.selected_index >= 0 ? result.selected_index : 0;
             count = fetch_cache_and_parse(&g_feeds[feed_idx]);
             if (count <= 0) {
-                ap_footer_item err_footer[] = {{.button = AP_BTN_A,.label = "OK",.is_confirm = true }};
-                ap_message_opts msg = {.message = "Refresh failed.\nCheck WiFi and try again.",.footer = err_footer,.footer_count = 1 };
-                ap_confirm_result cr;
-                ap_confirmation(&msg, &cr);
+                pakkit_message("Refresh failed.\nCheck WiFi and try again.", "OK");
                 return 0;
             }
             g_feeds[feed_idx].cached_article_count = g_article_count;
-            for (int i = 0; i < g_article_count; i++) {
-                memset(&items[i], 0, sizeof(items[i]));
-                items[i].label = g_articles[i].title;
-            }
+            for (int i = 0; i < g_article_count; i++)
+                items[i] = (pakkit_list_item){.label = g_articles[i].title };
             continue;
         }
+
         if (result.selected_index >= 0) {
             last_index = result.selected_index;
             show_article_detail(result.selected_index);
@@ -1143,50 +1163,44 @@ static int show_article_list(int feed_idx) {
 }
 
 static int show_feed_list(void) {
+    int last_index = 0;
+
     while (1) {
-        ap_list_item items[MAX_FEEDS];
+        pakkit_list_item items[MAX_FEEDS];
         static char feed_labels[MAX_FEEDS][MAX_LABEL + 16];
         for (int i = 0; i < g_feed_count; i++) {
-            memset(&items[i], 0, sizeof(items[i]));
             int cnt = g_feeds[i].cached_article_count;
             if (cnt > 0)
                 snprintf(feed_labels[i], sizeof(feed_labels[i]), "%s (%d)", g_feeds[i].label, cnt);
             else
                 snprintf(feed_labels[i], sizeof(feed_labels[i]), "%s", g_feeds[i].label);
-            items[i].label = feed_labels[i];
+            items[i] = (pakkit_list_item){.label = feed_labels[i] };
         }
 
-        ap_footer_item footer[] = {
-            {.button = AP_BTN_B,.label = "QUIT" },
-            {.button = AP_BTN_X,.label = "ADD" },
-            {.button = AP_BTN_Y,.label = "MENU" },
-            {.button = AP_BTN_A,.label = "OPEN",.is_confirm = true },
+        pakkit_hint hints[] = {
+            {.button = "B",.label = "Quit" },
+            {.button = "X",.label = "Add" },
+            {.button = "Y",.label = "Menu" },
+            {.button = "A",.label = "Open" },
         };
 
-        static int last_index = 0, last_visible = 0;
+        pakkit_list_opts opts = {.title            = "NextFeed",.hints            = hints,.hint_count       = 4,.secondary_button = AP_BTN_X,.tertiary_button  = AP_BTN_Y,.initial_index    = last_index,
+        };
 
-        ap_list_opts opts = ap_list_default_opts("NextFeed", items, g_feed_count);
-        opts.footer = footer; opts.footer_count = 4;
-        opts.initial_index = last_index; opts.visible_start_index = last_visible;
-        opts.secondary_action_button = AP_BTN_X;
-        opts.tertiary_action_button = AP_BTN_Y;
-        opts.status_bar = &g_status_bar;
+        pakkit_list_result result;
+        pakkit_list(&opts, items, g_feed_count, &result);
 
-        ap_list_result result;
-        int rc = ap_list(&opts, &result);
-        last_visible = result.visible_start_index;
-
-        if (rc != AP_OK || result.action == AP_ACTION_BACK) return 0;
+        if (result.action == PAKKIT_ACTION_BACK) return 0;
 
         /* X — add feed */
-        if (result.action == AP_ACTION_SECONDARY_TRIGGERED) {
+        if (result.action == PAKKIT_ACTION_SECONDARY) {
             last_index = result.selected_index >= 0 ? result.selected_index : 0;
             add_feed();
             update_article_counts();
             continue;
         }
         /* Y — menu */
-        if (result.action == AP_ACTION_TERTIARY_TRIGGERED) {
+        if (result.action == PAKKIT_ACTION_TERTIARY) {
             last_index = result.selected_index >= 0 ? result.selected_index : 0;
             show_menu(last_index, &last_index);
             continue;
@@ -1216,21 +1230,21 @@ int main(int argc, char *argv[]) {
 
     settings_load();
 
-    ap_config cfg = {.window_title       = "NextFeed",.log_path           = ap_resolve_log_path("nextfeed"),.is_nextui          = AP_PLATFORM_IS_DEVICE,.disable_background = true,
-    };
-    if (ap_init(&cfg) != AP_OK) {
-        fprintf(stderr, "Failed to initialise Apostrophe\n");
-        curl_global_cleanup();
-        return 1;
-    }
-
-    /* Truncate log so it only contains the current session */
+    /* Truncate log before ap_init so it only contains the current session */
     {
         const char *lp = ap_resolve_log_path("nextfeed");
         if (lp) {
             FILE *lf = fopen(lp, "w");
             if (lf) fclose(lf);
         }
+    }
+
+    ap_config cfg = {.window_title       = "NextFeed",.log_path           = ap_resolve_log_path("nextfeed"),.is_nextui          = AP_PLATFORM_IS_DEVICE,.disable_background = true,
+    };
+    if (ap_init(&cfg) != AP_OK) {
+        fprintf(stderr, "Failed to initialise Apostrophe\n");
+        curl_global_cleanup();
+        return 1;
     }
 
     settings_apply();
@@ -1244,15 +1258,8 @@ int main(int argc, char *argv[]) {
 
     if (g_feed_count == 0) {
         ap_log("WARNING: No feeds loaded.");
-        ap_footer_item err_footer[] = {
-            {.button = AP_BTN_B,.label = "QUIT" },
-            {.button = AP_BTN_X,.label = "ADD FEED" },
-        };
-        ap_message_opts msg = {.message = "No feeds configured.\nPress X to add a feed.",.image_path = NULL,.footer = err_footer,.footer_count = 2,
-        };
-        ap_confirm_result cr;
-        ap_confirmation(&msg, &cr);
-        if (!cr.confirmed) add_feed();
+        pakkit_message("No feeds configured.\nPress A to add a feed.", "Add Feed");
+        add_feed();
     }
 
     if (g_feed_count > 0) auto_refresh_feeds();

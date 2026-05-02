@@ -14,21 +14,16 @@ SDL_LDFLAGS := $(shell $(PKG_CONFIG) --libs sdl2) -lSDL2_ttf -lSDL2_image
 CURL_PREFIX    := /workspace/third_party/apostrophe/build/third_party/$(PLATFORM_ID)/curl/install
 OPENSSL_PREFIX := /workspace/third_party/apostrophe/build/third_party/$(PLATFORM_ID)/openssl/install
 CURL_CFLAGS    := -I$(CURL_PREFIX)/include -DAP_ENABLE_CURL -ffunction-sections -fdata-sections
-CURL_LDFLAGS   := -Wl,--whole-archive $(CURL_PREFIX)/lib/libcurl.a -Wl,--no-whole-archive \
-	$(OPENSSL_PREFIX)/lib/libssl.a $(OPENSSL_PREFIX)/lib/libcrypto.a \
-	-lz -Wl,--gc-sections
+CURL_LDFLAGS   := -Wl,--whole-archive $(CURL_PREFIX)/lib/libcurl.a -Wl,--no-whole-archive 	$(OPENSSL_PREFIX)/lib/libssl.a $(OPENSSL_PREFIX)/lib/libcrypto.a 	-lz -Wl,--gc-sections
 
 WORKSPACE  := /workspace
 BUILD_DIR  ?= $(WORKSPACE)/build/tg5040
 SRC        := $(WORKSPACE)/src/main.c
 AP_INCLUDE := $(WORKSPACE)/third_party/apostrophe/include
-DEPS       := $(AP_INCLUDE)/apostrophe.h $(AP_INCLUDE)/apostrophe_widgets.h
+PK_INCLUDE := $(WORKSPACE)/third_party/pakkit/include
+DEPS       := $(AP_INCLUDE)/apostrophe.h $(AP_INCLUDE)/apostrophe_widgets.h $(PK_INCLUDE)/pakkit_ui.h
 
-CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation -Wno-stringop-truncation \
-	-mcpu=cortex-a53 -mtune=cortex-a53 \
-	-DPLATFORM_TG5040 \
-	-I$(AP_INCLUDE) \
-	$(SDL_CFLAGS) $(CURL_CFLAGS)
+CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation -Wno-stringop-truncation 	-mcpu=cortex-a53 -mtune=cortex-a53 	-DPLATFORM_TG5040 	-I$(AP_INCLUDE) 	-I$(PK_INCLUDE) 	$(SDL_CFLAGS) $(CURL_CFLAGS)
 
 LDFLAGS := $(SDL_LDFLAGS) $(CURL_LDFLAGS) -lpthread -ldl -lm
 
