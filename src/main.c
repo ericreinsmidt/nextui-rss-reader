@@ -31,7 +31,7 @@
 #define MAX_PATH_LEN 1024
 #define MIN_USEFUL_DESC 50
 #define CACHE_MAX_AGE_SECS (60 * 60)
-#define NEXTFEED_VERSION "0.2.0"
+#define NEXTFEED_VERSION "0.3.0"
 
 /* -----------------------------------------------------------------------
  * Data structures
