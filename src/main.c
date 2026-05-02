@@ -143,7 +143,7 @@ static void decode_xml_entities(char *s) {
             else if (strncmp(r, "&trade;", 7) == 0)   { *w++ = 'T'; *w++ = 'M'; r += 7; }
             else if (r[1] == '#') {
                 unsigned int codepoint = 0;
-                const char *end = NULL;
+                char *end = NULL;
                 if (r[2] == 'x' || r[2] == 'X') {
                     const char *hex_start = r + 3;
                     char *hex_end = NULL;
@@ -1222,6 +1222,15 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failed to initialise Apostrophe\n");
         curl_global_cleanup();
         return 1;
+    }
+
+    /* Truncate log so it only contains the current session */
+    {
+        const char *lp = ap_resolve_log_path("nextfeed");
+        if (lp) {
+            FILE *lf = fopen(lp, "w");
+            if (lf) fclose(lf);
+        }
     }
 
     settings_apply();
