@@ -33,16 +33,6 @@
 #define CACHE_MAX_AGE_SECS (60 * 60)
 #define NEXTFEED_VERSION "0.2.0"
 
-#define DEFAULT_BG_R   30
-#define DEFAULT_BG_G   30
-#define DEFAULT_BG_B   35
-#define DEFAULT_TEXT_R  220
-#define DEFAULT_TEXT_G  220
-#define DEFAULT_TEXT_B  220
-#define DEFAULT_HINT_R  140
-#define DEFAULT_HINT_G  140
-#define DEFAULT_HINT_B  150
-
 /* -----------------------------------------------------------------------
  * Data structures
  * ----------------------------------------------------------------------- */
@@ -81,12 +71,6 @@ typedef struct {
     char   *status_msg;
 } refresh_all_task_t;
 
-typedef struct {
-    ap_color bg_color;
-    ap_color text_color;
-    ap_color hint_color;
-} app_settings_t;
-
 /* -----------------------------------------------------------------------
  * Globals
  * ----------------------------------------------------------------------- */
@@ -100,8 +84,6 @@ static int       g_article_count = 0;
 static char      g_feeds_path[MAX_PATH_LEN] = {0};
 static char      g_cache_dir[MAX_PATH_LEN] = {0};
 static char      g_config_dir[MAX_PATH_LEN] = {0};
-
-static app_settings_t g_settings;
 
 /* -----------------------------------------------------------------------
  * String helpers
@@ -265,70 +247,6 @@ static int is_useful_description(const char *desc) {
     if (strlen(desc) < MIN_USEFUL_DESC) return 0;
     if (strcasecmp(desc, "Comments") == 0) return 0;
     return 1;
-}
-
-/* -----------------------------------------------------------------------
- * Settings load/save
- * ----------------------------------------------------------------------- */
-
-static void settings_set_defaults(void) {
-    g_settings.bg_color   = (ap_color){DEFAULT_BG_R, DEFAULT_BG_G, DEFAULT_BG_B, 255};
-    g_settings.text_color = (ap_color){DEFAULT_TEXT_R, DEFAULT_TEXT_G, DEFAULT_TEXT_B, 255};
-    g_settings.hint_color = (ap_color){DEFAULT_HINT_R, DEFAULT_HINT_G, DEFAULT_HINT_B, 255};
-}
-
-static void settings_apply(void) {
-    ap_theme *theme = ap_get_theme();
-    theme->background = g_settings.bg_color;
-    theme->text       = g_settings.text_color;
-    theme->hint       = g_settings.hint_color;
-}
-
-static void settings_save(void) {
-    if (g_config_dir[0] == '\0') return;
-    char path[MAX_PATH_LEN];
-    snprintf(path, sizeof(path), "%s/settings.txt", g_config_dir);
-    FILE *f = fopen(path, "w");
-    if (!f) { ap_log("settings: could not write %s", path); return; }
-    fprintf(f, "bg_color=#%02X%02X%02X\n", g_settings.bg_color.r, g_settings.bg_color.g, g_settings.bg_color.b);
-    fprintf(f, "text_color=#%02X%02X%02X\n", g_settings.text_color.r, g_settings.text_color.g, g_settings.text_color.b);
-    fprintf(f, "hint_color=#%02X%02X%02X\n", g_settings.hint_color.r, g_settings.hint_color.g, g_settings.hint_color.b);
-    fclose(f);
-    ap_log("settings: saved to %s", path);
-}
-
-static int parse_hex_color(const char *hex, ap_color *out) {
-    if (!hex || hex[0] != '#' || strlen(hex) < 7) return -1;
-    unsigned int r, g, b;
-    if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) == 3) {
-        out->r = (uint8_t)r; out->g = (uint8_t)g; out->b = (uint8_t)b; out->a = 255;
-        return 0;
-    }
-    return -1;
-}
-
-static void settings_load(void) {
-    settings_set_defaults();
-    if (g_config_dir[0] == '\0') return;
-    char path[MAX_PATH_LEN];
-    snprintf(path, sizeof(path), "%s/settings.txt", g_config_dir);
-    FILE *f = fopen(path, "r");
-    if (!f) { ap_log("settings: no settings file, using defaults"); return; }
-    char line[256];
-    while (fgets(line, sizeof(line), f)) {
-        trim_inplace(line);
-        if (line[0] == '#' || line[0] == '\0') continue;
-        char *eq = strchr(line, '=');
-        if (!eq) continue;
-        *eq = '\0';
-        char *key = line; char *val = eq + 1;
-        trim_inplace(key); trim_inplace(val);
-        if (strcmp(key, "bg_color") == 0) parse_hex_color(val, &g_settings.bg_color);
-        else if (strcmp(key, "text_color") == 0) parse_hex_color(val, &g_settings.text_color);
-        else if (strcmp(key, "hint_color") == 0) parse_hex_color(val, &g_settings.hint_color);
-    }
-    fclose(f);
-    ap_log("settings: loaded from %s", path);
 }
 
 /* -----------------------------------------------------------------------
@@ -772,14 +690,18 @@ static int open_feed(const feed_t *feed) {
  * ----------------------------------------------------------------------- */
 
 static void add_feed(void) {
-    ap_keyboard_result name_result;
-    int rc = ap_keyboard("", "Step 1/2: Feed name  |  Y: Cancel", AP_KB_GENERAL, &name_result);
+    pakkit_keyboard_result name_result;
+    pakkit_keyboard_opts name_opts = {.prompt = "Step 1/2: Feed name" };
+    int rc = pakkit_keyboard("", &name_opts, &name_result);
     if (rc != AP_OK || name_result.text[0] == '\0') return;
-    const char *shortcuts[] = { "https://", ".com", ".org", "/rss", "/feed", "/atom.xml" };
-    ap_url_keyboard_config url_cfg = {.shortcut_keys = shortcuts,.shortcut_count = 6 };
-    ap_keyboard_result url_result;
-    rc = ap_url_keyboard("https://", "Step 2/2: Feed URL  |  Y: Cancel", &url_cfg, &url_result);
+
+    const char *shortcuts[] = { ".com", ".org", ".io", "/rss", "/feed", "/atom", ".xml", ".rss" };
+    pakkit_keyboard_opts url_opts = {.prompt = "Step 2/2: Feed URL",.shortcuts = shortcuts,.shortcut_count = 8,
+    };
+    pakkit_keyboard_result url_result;
+    rc = pakkit_keyboard("https://", &url_opts, &url_result);
     if (rc != AP_OK || url_result.text[0] == '\0') return;
+
     if (g_feed_count >= MAX_FEEDS) {
         pakkit_message("Maximum number of feeds reached.", "OK");
         return;
@@ -796,14 +718,19 @@ static void add_feed(void) {
 
 static void edit_feed(int index) {
     if (index < 0 || index >= g_feed_count) return;
-    ap_keyboard_result name_result;
-    int rc = ap_keyboard(g_feeds[index].label, "Edit feed name  |  Y: Cancel", AP_KB_GENERAL, &name_result);
+
+    pakkit_keyboard_opts name_opts = {.prompt = "Edit feed name" };
+    pakkit_keyboard_result name_result;
+    int rc = pakkit_keyboard(g_feeds[index].label, &name_opts, &name_result);
     if (rc != AP_OK) return;
-    const char *shortcuts[] = { "https://", ".com", ".org", "/rss", "/feed", "/atom.xml" };
-    ap_url_keyboard_config url_cfg = {.shortcut_keys = shortcuts,.shortcut_count = 6 };
-    ap_keyboard_result url_result;
-    rc = ap_url_keyboard(g_feeds[index].url, "Edit feed URL  |  Y: Cancel", &url_cfg, &url_result);
+
+    const char *shortcuts[] = { ".com", ".org", ".io", "/rss", "/feed", "/atom", ".xml", ".rss" };
+    pakkit_keyboard_opts url_opts = {.prompt = "Step 2/2: Feed URL",.shortcuts = shortcuts,.shortcut_count = 8,
+    };
+    pakkit_keyboard_result url_result;
+    rc = pakkit_keyboard(g_feeds[index].url, &url_opts, &url_result);
     if (rc != AP_OK) return;
+
     if (name_result.text[0] != '\0') {
         strncpy(g_feeds[index].label, name_result.text, MAX_LABEL - 1);
         trim_inplace(g_feeds[index].label);
@@ -859,51 +786,6 @@ static void show_about(void) {
     pakkit_detail_opts opts = {.title        = "NextFeed",.subtitle     = "RSS/Atom reader for NextUI",.info         = info,.info_count   = 4,.credits      = credits,.credit_count = 3,
     };
     pakkit_detail_screen(&opts);
-}
-
-/* -----------------------------------------------------------------------
- * Color settings screen
- * ----------------------------------------------------------------------- */
-
-static void show_color_settings(void) {
-    while (1) {
-        pakkit_menu_item items[] = {
-            {.label = "Background" },
-            {.label = "Text" },
-            {.label = "Hint" },
-            {.label = "Reset Defaults" },
-        };
-        pakkit_menu_result result;
-        int rc = pakkit_menu("Colors", items, 4, &result);
-        if (rc != AP_OK) return;
-
-        ap_color picked;
-        switch (result.selected_index) {
-            case 0:
-                if (ap_color_picker(g_settings.bg_color, &picked) == AP_OK) {
-                    g_settings.bg_color = picked;
-                    settings_apply(); settings_save();
-                }
-                break;
-            case 1:
-                if (ap_color_picker(g_settings.text_color, &picked) == AP_OK) {
-                    g_settings.text_color = picked;
-                    settings_apply(); settings_save();
-                }
-                break;
-            case 2:
-                if (ap_color_picker(g_settings.hint_color, &picked) == AP_OK) {
-                    g_settings.hint_color = picked;
-                    settings_apply(); settings_save();
-                }
-                break;
-            case 3:
-                settings_set_defaults();
-                settings_apply(); settings_save();
-                pakkit_message("Colors reset to defaults.", "OK");
-                break;
-        }
-    }
 }
 
 /* -----------------------------------------------------------------------
@@ -964,12 +846,11 @@ static void show_menu(int feed_index, int *new_index) {
 
     pakkit_menu_item items[] = {
         {.label = "Manage Feed" },
-        {.label = "Colors" },
         {.label = "About" },
     };
 
     pakkit_menu_result result;
-    int rc = pakkit_menu("Menu", items, 3, &result);
+    int rc = pakkit_menu("Menu", items, 2, &result);
     if (rc != AP_OK) return;
 
     switch (result.selected_index) {
@@ -978,9 +859,6 @@ static void show_menu(int feed_index, int *new_index) {
                 manage_feed(feed_index, new_index);
             break;
         case 1:
-            show_color_settings();
-            break;
-        case 2:
             show_about();
             break;
     }
@@ -993,7 +871,6 @@ static void show_menu(int feed_index, int *new_index) {
 static int show_article_detail(int article_idx) {
     article_t *art = &g_articles[article_idx];
 
-    /* Build subtitle from source and date */
     char subtitle[256] = {0};
     if (art->domain[0] && art->pub_date[0])
         snprintf(subtitle, sizeof(subtitle), "%s  |  %s", art->domain, art->pub_date);
@@ -1002,16 +879,6 @@ static int show_article_detail(int article_idx) {
     else if (art->pub_date[0])
         snprintf(subtitle, sizeof(subtitle), "%s", art->pub_date);
 
-    /*
-     * pakkit_detail_screen uses info pairs and credits, but for an article
-     * we really just want a scrollable text body. We repurpose credits
-     * for the description text since it renders as wrapped lines.
-     * For now, use info pairs for metadata and credits for description.
-     *
-     * Actually — pakkit_detail_screen doesn't have a free-text body section.
-     * We'll use a custom article detail screen drawn directly with Apostrophe
-     * primitives + pakkit_draw_hints, matching the PakKit visual style.
-     */
     int running = 1;
     int scroll_y = 0;
 
@@ -1228,8 +1095,6 @@ int main(int argc, char *argv[]) {
     const char *config_env = getenv("NEXTFEED_CONFIG_DIR");
     if (config_env) strncpy(g_config_dir, config_env, sizeof(g_config_dir) - 1);
 
-    settings_load();
-
     /* Truncate log before ap_init so it only contains the current session */
     {
         const char *lp = ap_resolve_log_path("nextfeed");
@@ -1247,7 +1112,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    settings_apply();
+    /* Apply default theme colors */
+    ap_theme *theme = ap_get_theme();
+    theme->background = (ap_color){30, 30, 35, 255};
+    theme->text       = (ap_color){220, 220, 220, 255};
+    theme->hint       = (ap_color){140, 140, 150, 255};
 
     ap_log("=== NextFeed v%s starting ===", NEXTFEED_VERSION);
     ap_log("Cache dir: %s", g_cache_dir[0] ? g_cache_dir : "(none)");
