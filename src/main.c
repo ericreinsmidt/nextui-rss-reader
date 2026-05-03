@@ -5,8 +5,6 @@
 
 #define AP_IMPLEMENTATION
 #include "apostrophe.h"
-#define AP_WIDGETS_IMPLEMENTATION
-#include "apostrophe_widgets.h"
 #define PAKKIT_UI_IMPLEMENTATION
 #include "pakkit_ui.h"
 
@@ -56,20 +54,6 @@ typedef struct {
     size_t size;
     size_t capacity;
 } fetch_buf_t;
-
-typedef struct {
-    const char *url;
-    fetch_buf_t buf;
-    int         result;
-} fetch_task_t;
-
-typedef struct {
-    feed_t *feeds;
-    int     feed_count;
-    int     refreshed;
-    int     failed;
-    char   *status_msg;
-} refresh_all_task_t;
 
 /* -----------------------------------------------------------------------
  * Globals
@@ -469,40 +453,9 @@ static int fetch_url(const char *url, fetch_buf_t *buf) {
     return 0;
 }
 
-static int fetch_worker(void *userdata) {
-    fetch_task_t *task = (fetch_task_t *)userdata;
-    task->result = fetch_url(task->url, &task->buf);
-    return 0;
-}
-
 /* -----------------------------------------------------------------------
  * Auto-refresh
  * ----------------------------------------------------------------------- */
-
-static int refresh_all_worker(void *userdata) {
-    refresh_all_task_t *task = (refresh_all_task_t *)userdata;
-    task->refreshed = 0; task->failed = 0;
-    for (int i = 0; i < task->feed_count; i++) {
-        if (task->feeds[i].url[0] == '\0') continue;
-        long age = cache_age_secs(task->feeds[i].url);
-        if (age >= 0 && age < CACHE_MAX_AGE_SECS) {
-            ap_log("refresh_all: %s cache is %ld sec old, skipping", task->feeds[i].label, age);
-            continue;
-        }
-        ap_log("refresh_all: fetching %s", task->feeds[i].label);
-        if (task->status_msg)
-            snprintf(task->status_msg, 256, "Refreshing %s... (%d/%d)",
-                     task->feeds[i].label, i + 1, task->feed_count);
-        fetch_buf_t buf;
-        int rc = fetch_url(task->feeds[i].url, &buf);
-        if (rc == 0 && buf.data) {
-            save_to_cache(task->feeds[i].url, buf.data, buf.size);
-            task->refreshed++;
-            free(buf.data);
-        } else { task->failed++; }
-    }
-    return 0;
-}
 
 static void auto_refresh_feeds(void) {
     int stale_count = 0;
@@ -513,14 +466,30 @@ static void auto_refresh_feeds(void) {
     }
     if (stale_count == 0) { ap_log("auto_refresh: all feeds are fresh"); return; }
     ap_log("auto_refresh: %d feed(s) need refreshing", stale_count);
-    char status_buf[256] = "Refreshing feeds...";
-    char *status_ptr = status_buf;
-    refresh_all_task_t task = {.feeds = g_feeds,.feed_count = g_feed_count,.refreshed = 0,.failed = 0,.status_msg = status_buf,
-    };
-    ap_process_opts proc = {.message = "Refreshing feeds...",.show_progress = false,.dynamic_message = &status_ptr,.message_lines = 2,
-    };
-    ap_process_message(&proc, refresh_all_worker, &task);
-    ap_log("auto_refresh: done. %d refreshed, %d failed", task.refreshed, task.failed);
+
+    int refreshed = 0, failed = 0;
+    for (int i = 0; i < g_feed_count; i++) {
+        if (g_feeds[i].url[0] == '\0') continue;
+        long age = cache_age_secs(g_feeds[i].url);
+        if (age >= 0 && age < CACHE_MAX_AGE_SECS) continue;
+
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Refreshing %s...\n(%d/%d)",
+                 g_feeds[i].label, i + 1, g_feed_count);
+        pakkit_loading(msg);
+
+        fetch_buf_t buf;
+        int rc = fetch_url(g_feeds[i].url, &buf);
+        if (rc == 0 && buf.data) {
+            save_to_cache(g_feeds[i].url, buf.data, buf.size);
+            refreshed++;
+            free(buf.data);
+        } else {
+            failed++;
+        }
+    }
+
+    ap_log("auto_refresh: done. %d refreshed, %d failed", refreshed, failed);
     update_article_counts();
 }
 
@@ -661,18 +630,18 @@ static int fetch_cache_and_parse(const feed_t *feed) {
         return -1;
     }
     ap_log("Fetching feed: %s [%s]", feed->label, feed->url);
-    fetch_task_t task;
-    task.url = feed->url;
-    task.buf.data = NULL; task.buf.size = 0; task.buf.capacity = 0;
-    task.result = -1;
+
     char msg[256];
     snprintf(msg, sizeof(msg), "Fetching %s...", feed->label);
-    ap_process_opts proc = {.message = msg,.show_progress = false };
-    ap_process_message(&proc, fetch_worker, &task);
-    if (task.result != 0) return -1;
-    save_to_cache(feed->url, task.buf.data, task.buf.size);
-    int count = parse_feed_xml(task.buf.data);
-    free(task.buf.data);
+    pakkit_loading(msg);
+
+    fetch_buf_t buf;
+    int rc = fetch_url(feed->url, &buf);
+    if (rc != 0) return -1;
+
+    save_to_cache(feed->url, buf.data, buf.size);
+    int count = parse_feed_xml(buf.data);
+    free(buf.data);
     return count;
 }
 
@@ -1117,6 +1086,51 @@ int main(int argc, char *argv[]) {
     theme->background = (ap_color){30, 30, 35, 255};
     theme->text       = (ap_color){220, 220, 220, 255};
     theme->hint       = (ap_color){140, 140, 150, 255};
+
+    /* Splash screen */
+    {
+        const char *pak_dir = getenv("NEXTFEED_PAK_DIR");
+        char splash_path[MAX_PATH_LEN];
+        if (pak_dir)
+            snprintf(splash_path, sizeof(splash_path), "%s/res/splash.png", pak_dir);
+        else
+            snprintf(splash_path, sizeof(splash_path), "res/splash.png");
+
+        SDL_Texture *splash = ap_load_image(splash_path);
+        if (splash) {
+            int sw = ap_get_screen_width();
+            int sh = ap_get_screen_height();
+            int img_w, img_h;
+            SDL_QueryTexture(splash, NULL, NULL, &img_w, &img_h);
+
+            int max_w = sw - AP_DS(5) * 8;
+            int max_h = sh - AP_DS(5) * 8;
+            float scale_w = (float)max_w / (float)img_w;
+            float scale_h = (float)max_h / (float)img_h;
+            float scale = (scale_w < scale_h) ? scale_w : scale_h;
+            int draw_w = (int)(img_w * scale);
+            int draw_h = (int)(img_h * scale);
+            int x = (sw - draw_w) / 2;
+            int y = (sh - draw_h) / 2;
+
+            ap_clear_screen();
+            ap_draw_background();
+            ap_draw_image(splash, x, y, draw_w, draw_h);
+            ap_present();
+
+            int waited = 0;
+            while (waited < 1000) {
+                ap_input_event ev;
+                while (ap_poll_input(&ev)) {
+                    if (ev.pressed && !ev.repeated) waited = 1000;
+                }
+                SDL_Delay(16);
+                waited += 16;
+            }
+
+            SDL_DestroyTexture(splash);
+        }
+    }
 
     ap_log("=== NextFeed v%s starting ===", NEXTFEED_VERSION);
     ap_log("Cache dir: %s", g_cache_dir[0] ? g_cache_dir : "(none)");
