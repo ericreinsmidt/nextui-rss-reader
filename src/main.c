@@ -467,16 +467,16 @@ static void auto_refresh_feeds(void) {
     if (stale_count == 0) { ap_log("auto_refresh: all feeds are fresh"); return; }
     ap_log("auto_refresh: %d feed(s) need refreshing", stale_count);
 
-    int refreshed = 0, failed = 0;
+    int refreshed = 0, failed = 0, progress = 0;
     for (int i = 0; i < g_feed_count; i++) {
         if (g_feeds[i].url[0] == '\0') continue;
         long age = cache_age_secs(g_feeds[i].url);
         if (age >= 0 && age < CACHE_MAX_AGE_SECS) continue;
 
+        progress++;
         char msg[256];
-        snprintf(msg, sizeof(msg), "Refreshing %s...\n(%d/%d)",
-                 g_feeds[i].label, i + 1, g_feed_count);
-        pakkit_loading(msg);
+        snprintf(msg, sizeof(msg), "Refreshing %s...", g_feeds[i].label);
+        pakkit_progress(msg, progress, stale_count);
 
         fetch_buf_t buf;
         int rc = fetch_url(g_feeds[i].url, &buf);
