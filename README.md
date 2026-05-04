@@ -2,15 +2,15 @@
 
 ![NextFeed](assets/logo.png)
 
+![GitHub release](https://img.shields.io/github/v/release/ericreinsmidt/nextui-nimbus)
+![GitHub downloads](https://img.shields.io/github/downloads/ericreinsmidt/nextui-nimbus/total)
+![License](https://img.shields.io/github/license/ericreinsmidt/nextui-nimbus)
+
 An RSS/Atom feed reader for [NextUI](https://github.com/LoveRetro/NextUI) on TrimUI handheld devices.
 
 Browse headlines from your favorite feeds directly on your TrimUI Brick or Smart Pro.
 
 Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](https://github.com/Helaas/Apostrophe).
-
-![GitHub release](https://img.shields.io/github/v/release/ericreinsmidt/nextui-nimbus)
-![GitHub downloads](https://img.shields.io/github/downloads/ericreinsmidt/nextui-nimbus/total)
-![License](https://img.shields.io/github/license/ericreinsmidt/nextui-nimbus)
 
 ## Features
 
