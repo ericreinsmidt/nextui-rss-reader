@@ -1,3 +1,5 @@
+<div align="center">
+
 # NextFeed
 
 ![NextFeed](assets/logo.png)
@@ -11,6 +13,8 @@ An RSS/Atom feed reader for [NextUI](https://github.com/LoveRetro/NextUI) on Tri
 Browse headlines from your favorite feeds directly on your TrimUI Brick or Smart Pro.
 
 Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](https://github.com/Helaas/Apostrophe).
+
+</div>
 
 ## Features
 
