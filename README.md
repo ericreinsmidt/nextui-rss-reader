@@ -8,6 +8,11 @@ Browse headlines from your favorite feeds directly on your TrimUI Brick or Smart
 
 Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](https://github.com/Helaas/Apostrophe).
 
+![GitHub release](https://img.shields.io/github/v/release/ericreinsmidt/nextui-nimbus)
+![GitHub downloads](https://img.shields.io/github/downloads/ericreinsmidt/nextui-nimbus/total)
+![License](https://img.shields.io/github/license/ericreinsmidt/nextui-nimbus)
+![GitHub stars](https://img.shields.io/github/stars/ericreinsmidt/nextui-nimbus)
+
 ## Features
 
 - **RSS 2.0 and Atom** feed support
