@@ -1,52 +1,66 @@
-#!/bin/sh
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -eu
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PLATFORM="tg5040"
+PAK_DIR="$PROJECT_DIR/ports/$PLATFORM/pak"
+DIST_DIR="$PROJECT_DIR/dist"
+BUILD_DIR="$PROJECT_DIR/build/$PLATFORM"
+PAK_JSON="$PROJECT_DIR/pak.json"
 
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-PAK_DIR="${ROOT_DIR}/ports/tg5040/pak"
-DIST_DIR="${ROOT_DIR}/dist"
-PAK_JSON="${ROOT_DIR}/pak.json"
+APP_NAME="$(grep -E '"name"' "$PAK_JSON" | head -n1 | cut -d'"' -f4)"
+RELEASE_FILENAME="$(grep -E '"release_filename"' "$PAK_JSON" | head -n1 | cut -d'"' -f4)"
 
-VERSION="$(grep -E '"version"' "${PAK_JSON}" | head -n 1 | cut -d '"' -f 4)"
-RELEASE_FILENAME="$(grep -E '"release_filename"' "${PAK_JSON}" | head -n 1 | cut -d '"' -f 4)"
-OUTPUT_ZIP="${DIST_DIR}/${RELEASE_FILENAME}"
-TMP_DIR="${DIST_DIR}/tmp-package"
+echo ""
+echo "=== Packaging ${APP_NAME} for ${PLATFORM} ==="
+echo ""
 
-mkdir -p "${DIST_DIR}"
-
-if [ ! -d "${PAK_DIR}" ]; then
-  echo "Pak directory not found: ${PAK_DIR}"
-  exit 1
+# Validate
+if [ -z "$APP_NAME" ] || [ -z "$RELEASE_FILENAME" ]; then
+    echo "ERROR: Failed to read name or release_filename from pak.json"
+    exit 1
 fi
 
-if [ -z "${VERSION}" ] || [ -z "${RELEASE_FILENAME}" ]; then
-  echo "Failed to read version or release_filename from pak.json"
-  exit 1
+if [ ! -f "$BUILD_DIR/nextfeed" ]; then
+    echo "ERROR: Binary not found at $BUILD_DIR/nextfeed — run 'make build' first"
+    exit 1
 fi
 
-rm -rf "${TMP_DIR}"
-mkdir -p "${TMP_DIR}"
+# Stage build artifacts into pak dir
+cp "$BUILD_DIR/nextfeed" "$PAK_DIR/bin/nextfeed"
+chmod +x "$PAK_DIR/bin/nextfeed"
 
-echo "Packaging pak..."
-cp -R "${PAK_DIR}/." "${TMP_DIR}/"
+mkdir -p "$PAK_DIR/lib"
+cp "$BUILD_DIR/lib/cacert.pem" "$PAK_DIR/lib/cacert.pem"
 
-if [ ! -f "${TMP_DIR}/launch.sh" ]; then
-  echo "Missing launch.sh in temp package directory"
-  exit 1
+# Sync default feeds
+mkdir -p "$PAK_DIR/assets/feeds"
+cp "$PROJECT_DIR/assets/feeds/default_feeds.txt" "$PAK_DIR/assets/feeds/default_feeds.txt"
+
+# Create clean zip via temp dir (excludes.DS_Store)
+mkdir -p "$DIST_DIR"
+TMP_DIR="$DIST_DIR/tmp-package"
+rm -rf "$TMP_DIR"
+mkdir -p "$TMP_DIR"
+
+rsync -a --exclude='.DS_Store' "$PAK_DIR/" "$TMP_DIR/"
+
+# Validate
+if [ ! -f "$TMP_DIR/launch.sh" ]; then
+    echo "ERROR: Missing launch.sh in pak directory"
+    rm -rf "$TMP_DIR"
+    exit 1
 fi
 
-rm -f "${OUTPUT_ZIP}"
+OUTPUT_ZIP="$DIST_DIR/$RELEASE_FILENAME"
+rm -f "$OUTPUT_ZIP"
+cd "$TMP_DIR"
+zip -r "$OUTPUT_ZIP" ./*
+cd "$PROJECT_DIR"
+rm -rf "$TMP_DIR"
 
-cd "${TMP_DIR}"
-set -- *
-if [ "$1" = "*" ]; then
-  echo "No files found in temp package directory"
-  exit 1
-fi
-
-zip -r "${OUTPUT_ZIP}" "$@"
-
-cd "${ROOT_DIR}"
-rm -rf "${TMP_DIR}"
-
-echo "Created: ${OUTPUT_ZIP}"
+echo ""
+echo "=== Package complete ==="
+echo "Output: dist/$RELEASE_FILENAME"
+echo ""

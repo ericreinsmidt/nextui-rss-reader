@@ -917,8 +917,7 @@ static int show_article_detail(int article_idx) {
         snprintf(subtitle, sizeof(subtitle), "%s", art->pub_date);
 
     int running = 1;
-    int scroll_y = 0;
-    int last_max_scroll = 0;
+    pakkit_scroll_state scroll = {0};
 
     while (running) {
         ap_input_event ev;
@@ -929,12 +928,10 @@ static int show_article_detail(int article_idx) {
                         if (!ev.repeated) running = 0;
                         break;
                     case AP_BTN_UP:
-                        scroll_y -= PAKKIT_SCROLL_STEP;
-                        if (scroll_y < 0) scroll_y = 0;
+                        pakkit_scroll_handle_input(&scroll, -1, PAKKIT_SCROLL_STEP);
                         break;
                     case AP_BTN_DOWN:
-                        scroll_y += PAKKIT_SCROLL_STEP;
-                        if (scroll_y > last_max_scroll) scroll_y = last_max_scroll;
+                        pakkit_scroll_handle_input(&scroll, 1, PAKKIT_SCROLL_STEP);
                         break;
                     default:
                         break;
@@ -966,7 +963,7 @@ static int show_article_detail(int article_idx) {
         SDL_Rect clip = { 0, content_top, sw, content_h };
         SDL_RenderSetClipRect(ap__g.renderer, &clip);
 
-        int y = content_top - scroll_y;
+        int y = content_top - scroll.scroll_y;
         int text_w = sw - pad * 6;
 
         /* Title (wrapped) */
@@ -999,10 +996,8 @@ static int show_article_detail(int article_idx) {
         }
 
         /* Update cached max_scroll for next frame's input clamping */
-        int total_content = y + scroll_y - content_top;
-        int max_scroll = total_content - content_h;
-        if (max_scroll < 0) max_scroll = 0;
-        last_max_scroll = max_scroll;
+        int total_content = y + scroll.scroll_y - content_top;
+        pakkit_scroll_update(&scroll, total_content, content_h);
 
         SDL_RenderSetClipRect(ap__g.renderer, NULL);
 
