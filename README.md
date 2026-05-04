@@ -2,9 +2,9 @@
 
 ![NextFeed](assets/logo.png)
 
-![GitHub release](https://img.shields.io/github/v/release/ericreinsmidt/nextui-nimbus)
-![GitHub downloads](https://img.shields.io/github/downloads/ericreinsmidt/nextui-nimbus/total)
-![License](https://img.shields.io/github/license/ericreinsmidt/nextui-nimbus)
+![GitHub release](https://img.shields.io/github/v/release/ericreinsmidt/nextui-rss-reader?style=for-the-badge&color=ff6600)
+![GitHub downloads](https://img.shields.io/github/downloads/ericreinsmidt/nextui-rss-reader/total?style=for-the-badge&color=ff6600)
+![License](https://img.shields.io/github/license/ericreinsmidt/nextui-rss-reader?style=for-the-badge&color=ff6600)
 
 An RSS/Atom feed reader for [NextUI](https://github.com/LoveRetro/NextUI) on TrimUI handheld devices.
 
