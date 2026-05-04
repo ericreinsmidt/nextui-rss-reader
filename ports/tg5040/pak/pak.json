@@ -1,6 +1,6 @@
 {
   "name": "NextFeed",
-  "version": "v0.3.0",
+  "version": "v1.0.0",
   "type": "TOOL",
   "description": "Offline-friendly RSS and Atom reader for NextUI devices.",
   "author": "Eric Reinsmidt",
@@ -10,6 +10,7 @@
     "tg5040"
   ],
   "changelog": {
+    "v1.0.0": "WiFi check before fetch with retry/continue, refresh all feeds, scroll bounce fix, new logo and splash screen.",
     "v0.3.0": "PakKit UI integration, custom on-screen keyboard with URL shortcuts, removed color settings, minimal text hints.",
     "v0.2.0": "Added caching of raw XML per feed, auto-refresh on launch, article count shown next to feed names, color picker and more.",
     "v0.1.0": "RSS 2.0 and Atom feed parsing, using Apostrophe for native NextUI look."
@@ -18,6 +19,9 @@
     "assets/logo.png",
     "assets/screenshots/feeds.png",
     "assets/screenshots/list.png",
-    "assets/screenshots/article.png"
+    "assets/screenshots/article.png",
+    "assets/screenshots/menu.png",
+    "assets/screenshots/keyboard.png",
+    "assets/screenshots/nowifi.png"
   ]
 }

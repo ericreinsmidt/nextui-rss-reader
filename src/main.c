@@ -29,7 +29,7 @@
 #define MAX_PATH_LEN 1024
 #define MIN_USEFUL_DESC 50
 #define CACHE_MAX_AGE_SECS (60 * 60)
-#define NEXTFEED_VERSION "0.3.0"
+#define NEXTFEED_VERSION "1.0.0"
 
 /* -----------------------------------------------------------------------
  * Data structures
@@ -68,6 +68,20 @@ static int       g_article_count = 0;
 static char      g_feeds_path[MAX_PATH_LEN] = {0};
 static char      g_cache_dir[MAX_PATH_LEN] = {0};
 static char      g_config_dir[MAX_PATH_LEN] = {0};
+
+/* -----------------------------------------------------------------------
+ * WiFi check
+ * ----------------------------------------------------------------------- */
+
+static int check_wifi(void) {
+    return ap__get_wifi_strength() > 0;
+}
+
+static int require_wifi(void) {
+    if (check_wifi()) return 1;
+    pakkit_message("No WiFi connection.\nConnect to WiFi and try again.", "OK");
+    return 0;
+}
 
 /* -----------------------------------------------------------------------
  * String helpers
@@ -432,7 +446,7 @@ static int fetch_url(const char *url, fetch_buf_t *buf) {
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "NextFeed/0.2");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "NextFeed/0.4");
     const char *ca = getenv("CURL_CA_BUNDLE");
     if (ca) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, ca);
@@ -491,6 +505,54 @@ static void auto_refresh_feeds(void) {
 
     ap_log("auto_refresh: done. %d refreshed, %d failed", refreshed, failed);
     update_article_counts();
+}
+
+static void refresh_all_feeds(void) {
+    if (g_feed_count == 0) {
+        pakkit_message("No feeds to refresh.", "OK");
+        return;
+    }
+
+    int total = 0;
+    for (int i = 0; i < g_feed_count; i++) {
+        if (g_feeds[i].url[0] != '\0') total++;
+    }
+    if (total == 0) {
+        pakkit_message("No feeds with URLs to refresh.", "OK");
+        return;
+    }
+
+    ap_log("refresh_all: refreshing %d feed(s)", total);
+
+    int refreshed = 0, failed = 0, progress = 0;
+    for (int i = 0; i < g_feed_count; i++) {
+        if (g_feeds[i].url[0] == '\0') continue;
+
+        progress++;
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Refreshing %s...", g_feeds[i].label);
+        pakkit_progress(msg, progress, total);
+
+        fetch_buf_t buf;
+        int rc = fetch_url(g_feeds[i].url, &buf);
+        if (rc == 0 && buf.data) {
+            save_to_cache(g_feeds[i].url, buf.data, buf.size);
+            refreshed++;
+            free(buf.data);
+        } else {
+            failed++;
+        }
+    }
+
+    update_article_counts();
+    ap_log("refresh_all: done. %d refreshed, %d failed", refreshed, failed);
+
+    char result_msg[256];
+    if (failed == 0)
+        snprintf(result_msg, sizeof(result_msg), "All %d feeds refreshed.", refreshed);
+    else
+        snprintf(result_msg, sizeof(result_msg), "%d refreshed, %d failed.", refreshed, failed);
+    pakkit_message(result_msg, "OK");
 }
 
 /* -----------------------------------------------------------------------
@@ -651,6 +713,7 @@ static int open_feed(const feed_t *feed) {
         ap_log("Loaded %d articles from cache for '%s'", count, feed->label);
         return count;
     }
+    if (!check_wifi()) return -1;
     return fetch_cache_and_parse(feed);
 }
 
@@ -815,11 +878,12 @@ static void show_menu(int feed_index, int *new_index) {
 
     pakkit_menu_item items[] = {
         {.label = "Manage Feed" },
+        {.label = "Refresh All Feeds" },
         {.label = "About" },
     };
 
     pakkit_menu_result result;
-    int rc = pakkit_menu("Menu", items, 2, &result);
+    int rc = pakkit_menu("Menu", items, 3, &result);
     if (rc != AP_OK) return;
 
     switch (result.selected_index) {
@@ -828,6 +892,10 @@ static void show_menu(int feed_index, int *new_index) {
                 manage_feed(feed_index, new_index);
             break;
         case 1:
+            if (require_wifi())
+                refresh_all_feeds();
+            break;
+        case 2:
             show_about();
             break;
     }
@@ -850,6 +918,7 @@ static int show_article_detail(int article_idx) {
 
     int running = 1;
     int scroll_y = 0;
+    int last_max_scroll = 0;
 
     while (running) {
         ap_input_event ev;
@@ -860,11 +929,12 @@ static int show_article_detail(int article_idx) {
                         if (!ev.repeated) running = 0;
                         break;
                     case AP_BTN_UP:
-                        if (scroll_y > 0) scroll_y -= PAKKIT_SCROLL_STEP;
+                        scroll_y -= PAKKIT_SCROLL_STEP;
                         if (scroll_y < 0) scroll_y = 0;
                         break;
                     case AP_BTN_DOWN:
                         scroll_y += PAKKIT_SCROLL_STEP;
+                        if (scroll_y > last_max_scroll) scroll_y = last_max_scroll;
                         break;
                     default:
                         break;
@@ -928,11 +998,11 @@ static int show_article_detail(int article_idx) {
             y += TTF_FontHeight(font_small) + pad * 2;
         }
 
-        /* Clamp scroll */
+        /* Update cached max_scroll for next frame's input clamping */
         int total_content = y + scroll_y - content_top;
         int max_scroll = total_content - content_h;
         if (max_scroll < 0) max_scroll = 0;
-        if (scroll_y > max_scroll) scroll_y = max_scroll;
+        last_max_scroll = max_scroll;
 
         SDL_RenderSetClipRect(ap__g.renderer, NULL);
 
@@ -980,6 +1050,7 @@ static int show_article_list(int feed_idx) {
 
         if (result.action == PAKKIT_ACTION_SECONDARY) {
             last_index = result.selected_index >= 0 ? result.selected_index : 0;
+            if (!require_wifi()) continue;
             count = fetch_cache_and_parse(&g_feeds[feed_idx]);
             if (count <= 0) {
                 pakkit_message("Refresh failed.\nCheck WiFi and try again.", "OK");
@@ -1145,7 +1216,30 @@ int main(int argc, char *argv[]) {
         add_feed();
     }
 
-    if (g_feed_count > 0) auto_refresh_feeds();
+    /* WiFi check before auto-refresh with retry/continue */
+    if (g_feed_count > 0) {
+        int has_stale = 0;
+        for (int i = 0; i < g_feed_count; i++) {
+            if (g_feeds[i].url[0] == '\0') continue;
+            long age = cache_age_secs(g_feeds[i].url);
+            if (age < 0 || age >= CACHE_MAX_AGE_SECS) { has_stale = 1; break; }
+        }
+
+        if (has_stale) {
+            while (!check_wifi()) {
+                int retry = pakkit_confirm(
+                    "No WiFi connection.\nCached feeds may be outdated.",
+                    "Retry", "Continue");
+                if (!retry) break;
+            }
+            if (check_wifi()) {
+                auto_refresh_feeds();
+            } else {
+                ap_log("auto_refresh: skipped — no WiFi, using cached data");
+            }
+        }
+    }
+
     update_article_counts();
 
     show_feed_list();

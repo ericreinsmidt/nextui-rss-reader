@@ -13,6 +13,8 @@ Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](ht
 - **RSS 2.0 and Atom** feed support
 - **On-device feed management** -- add, edit, delete, and reorder feeds
 - **Offline reading** -- feeds cached locally, auto-refreshed when older than one hour
+- **WiFi detection** -- checks for WiFi before fetching with retry/continue options
+- **Refresh all feeds** from the menu
 - **Article detail view** with source domain, publish date, and scrollable description
 - **On-screen keyboard** with URL shortcut buttons for easy feed entry
 - **Article count** shown next to each feed name
@@ -29,12 +31,17 @@ Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](ht
 |--------|----------|--------|
 | TrimUI Brick | tg5040 | Working |
 | TrimUI Smart Pro | tg5040 | Working |
+| TrimUI Brick Hammer | tg5040 | Working |
 
 ## Screenshots
 
 | Feed List | Article List | Article Detail |
 |-----------|-------------|----------------|
 | ![Feed List](assets/screenshots/feeds.png) | ![Article List](assets/screenshots/list.png) | ![Article Detail](assets/screenshots/article.png) |
+
+| Menu | Keyboard | No WiFi |
+|------|----------|---------|
+| ![Menu](assets/screenshots/menu.png) | ![Keyboard](assets/screenshots/keyboard.png) | ![No WiFi](assets/screenshots/nowifi.png) |
 
 ## Installation
 
@@ -64,7 +71,7 @@ You can add feeds from the feed list screen and edit or delete them from the men
 |--------|--------|
 | A | Open feed |
 | X | Add new feed |
-| Y | Menu (manage feed, about) |
+| Y | Menu |
 | B | Quit |
 
 ### Menu
@@ -72,6 +79,7 @@ You can add feeds from the feed list screen and edit or delete them from the men
 | Option | Description |
 |--------|-------------|
 | Manage Feed | Edit, delete, reorder, or clear cache for selected feed |
+| Refresh All Feeds | Re-fetch all feeds regardless of cache age |
 | About | Version info and credits |
 
 ### Article List
@@ -163,6 +171,8 @@ Then copy ports/tg5040/pak/ to /Tools/tg5040/NextFeed.pak/ on your SD card.
     |           +-- pak.json           # Pak metadata
     |           +-- bin/               # Built binary (not in repo)
     |           +-- lib/               # CA certs (not in repo)
+    |           +-- res/
+    |           |   +-- splash.png     # Splash screen
     |           +-- assets/
     |               +-- feeds/
     |                   +-- default_feeds.txt
@@ -191,7 +201,7 @@ Then copy ports/tg5040/pak/ to /Tools/tg5040/NextFeed.pak/ on your SD card.
 - **Language:** C (single-file architecture)
 - **UI Components:** [PakKit](https://github.com/ericreinsmidt/pakkit) + [Apostrophe](https://github.com/Helaas/Apostrophe) by Helaas
 - **HTTP:** libcurl with static OpenSSL
-- **Target:** TrimUI Brick / Smart Pro (tg5040) running NextUI
+- **Target:** TrimUI Brick / Smart Pro / Brick Hammer (tg5040) running NextUI
 
 ## Credits
 
