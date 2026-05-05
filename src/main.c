@@ -12,6 +12,7 @@
 #include <curl/curl.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <SDL2/SDL_image.h>
 
 /* -----------------------------------------------------------------------
  * Constants
@@ -27,6 +28,7 @@
 #define MAX_DATE     64
 #define MAX_DOMAIN   128
 #define MAX_PATH_LEN 1024
+#define MAX_IMAGE_URL 1024
 #define MIN_USEFUL_DESC 50
 #define CACHE_MAX_AGE_SECS (60 * 60)
 #define NEXTFEED_VERSION "1.0.0"
@@ -47,6 +49,7 @@ typedef struct {
     char description[MAX_DESC];
     char pub_date[MAX_DATE];
     char domain[MAX_DOMAIN];
+    char image_url[MAX_IMAGE_URL];
 } article_t;
 
 typedef struct {
@@ -316,6 +319,65 @@ static void clear_feed_cache(const char *url) {
     char path[MAX_PATH_LEN];
     get_cache_path(url, path, sizeof(path));
     if (remove(path) == 0) ap_log("cache: cleared %s", path);
+}
+
+/* Forward declaration */
+static int fetch_url(const char *url, fetch_buf_t *buf);
+
+/* -----------------------------------------------------------------------
+ * Image cache
+ * ----------------------------------------------------------------------- */
+
+static void get_image_cache_path(const char *url, char *out, size_t out_size) {
+    unsigned long hash = 5381;
+    const char *p = url;
+    while (*p) { hash = ((hash << 5) + hash) + (unsigned char)*p; p++; }
+    const char *ext = ".img";
+    if (strstr(url, ".png")) ext = ".png";
+    else if (strstr(url, ".jpg") || strstr(url, ".jpeg")) ext = ".jpg";
+    else if (strstr(url, ".webp")) ext = ".webp";
+    else if (strstr(url, ".gif")) ext = ".gif";
+    snprintf(out, out_size, "%s/img_%08lx%s", g_cache_dir, hash, ext);
+}
+
+static int image_cache_exists(const char *url) {
+    if (!url || !url[0]) return 0;
+    char path[MAX_PATH_LEN];
+    get_image_cache_path(url, path, sizeof(path));
+    return access(path, R_OK) == 0;
+}
+
+static int fetch_and_cache_image(const char *url) {
+    if (!url || !url[0]) return -1;
+    if (image_cache_exists(url)) return 0;
+
+    ap_log("image: fetching %s", url);
+    fetch_buf_t buf;
+    int rc = fetch_url(url, &buf);
+    if (rc != 0) return -1;
+
+    char path[MAX_PATH_LEN];
+    get_image_cache_path(url, path, sizeof(path));
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        ap_log("image: could not write %s", path);
+        free(buf.data);
+        return -1;
+    }
+    fwrite(buf.data, 1, buf.size, f);
+    fclose(f);
+    free(buf.data);
+    ap_log("image: cached %s", path);
+    return 0;
+}
+
+static SDL_Texture *load_cached_image_texture(const char *url) {
+    if (!url || !url[0]) return NULL;
+    char path[MAX_PATH_LEN];
+    get_image_cache_path(url, path, sizeof(path));
+    SDL_Texture *tex = IMG_LoadTexture(ap__g.renderer, path);
+    if (!tex) ap_log("image: failed to load texture from %s", path);
+    return tex;
 }
 
 static int count_cached_articles(const char *url) {
@@ -608,6 +670,127 @@ static const char *extract_atom_link(const char *xml, char *out, size_t out_size
     return NULL;
 }
 
+/* -----------------------------------------------------------------------
+ * Image URL extraction from feed items
+ * ----------------------------------------------------------------------- */
+
+static void extract_enclosure_image(const char *xml, char *out, size_t out_size) {
+    out[0] = '\0';
+    const char *enc = xml;
+    while ((enc = strstr(enc, "<enclosure")) != NULL) {
+        const char *tag_end = strchr(enc, '>');
+        if (!tag_end) return;
+        const char *type = strstr(enc, "type=\"");
+        int is_image = 0;
+        if (type && type < tag_end) {
+            is_image = (strstr(type, "image/") != NULL && strstr(type, "image/") < tag_end);
+        }
+        const char *url = strstr(enc, "url=\"");
+        if (url && url < tag_end) {
+            url += 5;
+            const char *url_end = strchr(url, '"');
+            if (url_end && url_end < tag_end + 200) {
+                size_t len = (size_t)(url_end - url);
+                if (is_image || strstr(url, ".jpg") || strstr(url, ".jpeg") ||
+                    strstr(url, ".png") || strstr(url, ".webp") || strstr(url, ".gif")) {
+                    if (len >= out_size) len = out_size - 1;
+                    memcpy(out, url, len);
+                    out[len] = '\0';
+                    return;
+                }
+            }
+        }
+        enc = tag_end + 1;
+    }
+}
+
+static void extract_media_image(const char *xml, char *out, size_t out_size) {
+    out[0] = '\0';
+    const char *tags[] = {"media:content", "media:thumbnail", NULL};
+    for (int t = 0; tags[t]; t++) {
+        const char *pos = xml;
+        char open[32];
+        snprintf(open, sizeof(open), "<%s", tags[t]);
+        while ((pos = strstr(pos, open)) != NULL) {
+            const char *tag_end = strchr(pos, '>');
+            if (!tag_end) break;
+            const char *url = strstr(pos, "url=\"");
+            if (url && url < tag_end) {
+                url += 5;
+                const char *url_end = strchr(url, '"');
+                if (url_end) {
+                    const char *medium = strstr(pos, "medium=\"image\"");
+                    int is_image = (medium && medium < tag_end);
+                    size_t len = (size_t)(url_end - url);
+                    if (!is_image) {
+                        is_image = (strstr(url, ".jpg") || strstr(url, ".jpeg") ||
+                                    strstr(url, ".png") || strstr(url, ".webp") ||
+                                    strstr(url, ".gif"));
+                    }
+                    if (!is_image && t == 1) is_image = 1;
+                    if (is_image && len > 0) {
+                        if (len >= out_size) len = out_size - 1;
+                        memcpy(out, url, len);
+                        out[len] = '\0';
+                        return;
+                    }
+                }
+            }
+            pos = tag_end + 1;
+        }
+    }
+}
+
+static void extract_img_from_html(const char *html, char *out, size_t out_size) {
+    out[0] = '\0';
+    const char *img = strstr(html, "<img");
+    if (!img) img = strstr(html, "<IMG");
+    if (!img) return;
+    const char *tag_end = strchr(img, '>');
+    if (!tag_end) return;
+    const char *s = strstr(img, "src=\"");
+    if (!s || s > tag_end) {
+        s = strstr(img, "src='");
+        if (!s || s > tag_end) return;
+        s += 5;
+        const char *s_end = strchr(s, '\'');
+        if (!s_end) return;
+        size_t len = (size_t)(s_end - s);
+        if (len >= out_size) len = out_size - 1;
+        memcpy(out, s, len);
+        out[len] = '\0';
+        return;
+    }
+    s += 5;
+    const char *s_end = strchr(s, '"');
+    if (!s_end) return;
+    size_t len = (size_t)(s_end - s);
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, s, len);
+    out[len] = '\0';
+}
+
+static void upgrade_image_url(char *url, size_t url_size) {
+    /* Reddit preview URLs: replace small width with larger */
+    if (strstr(url, "preview.redd.it") || strstr(url, "external-preview.redd.it")) {
+        char *w = strstr(url, "width=140");
+        if (w) {
+            /* width=140 -> width=640 (same length, safe in-place) */
+            w[6] = '6';
+        }
+    }
+}
+
+static void extract_article_image(const char *item_xml, const char *description,
+                                   char *out, size_t out_size) {
+    out[0] = '\0';
+    extract_enclosure_image(item_xml, out, out_size);
+    if (!(out[0])) extract_media_image(item_xml, out, out_size);
+    if (!(out[0]) && description && description[0])
+        extract_img_from_html(description, out, out_size);
+    if (out[0]) upgrade_image_url(out, out_size);
+}
+
 static int parse_feed_xml(const char *xml) {
     g_article_count = 0;
     if (!xml || !xml[0]) return 0;
@@ -653,6 +836,10 @@ static int parse_feed_xml(const char *xml) {
         } else {
             extract_tag(item_buf, "pubDate", raw_date, sizeof(raw_date));
         }
+        /* Extract hero image URL (before stripping HTML) */
+        extract_article_image(item_buf, art->description,
+                              art->image_url, MAX_IMAGE_URL);
+        decode_xml_entities(art->image_url);
         free(item_buf);
         decode_xml_entities(art->title); strip_html_tags(art->title);
         decode_xml_entities(art->title); trim_inplace(art->title);
@@ -916,6 +1103,20 @@ static int show_article_detail(int article_idx) {
     else if (art->pub_date[0])
         snprintf(subtitle, sizeof(subtitle), "%s", art->pub_date);
 
+    /* Load hero image if available */
+    SDL_Texture *hero_tex = NULL;
+    int hero_w = 0, hero_h = 0;
+    if (art->image_url[0]) {
+        if (!image_cache_exists(art->image_url)) {
+            if (check_wifi()) {
+                pakkit_loading("Loading image...");
+                fetch_and_cache_image(art->image_url);
+            }
+        }
+        hero_tex = load_cached_image_texture(art->image_url);
+        if (hero_tex) SDL_QueryTexture(hero_tex, NULL, NULL, &hero_w, &hero_h);
+    }
+
     int running = 1;
     pakkit_scroll_state scroll = {0};
 
@@ -984,6 +1185,17 @@ static int show_article_detail(int article_idx) {
         ap_draw_rect(pad * 3, y, sw - pad * 6, 1, hint_color);
         y += pad * 3;
 
+        /* Hero image */
+        if (hero_tex && hero_w > 0 && hero_h > 0) {
+            int max_img_w = text_w;
+            float scale = (float)max_img_w / hero_w;
+            int draw_w = (int)(hero_w * scale);
+            int draw_h = (int)(hero_h * scale);
+            int img_x = pad * 3 + (max_img_w - draw_w) / 2;
+            ap_draw_image(hero_tex, img_x, y, draw_w, draw_h);
+            y += draw_h + pad * 3;
+        }
+
         /* Description body */
         if (is_useful_description(art->description)) {
             int desc_h = ap_measure_wrapped_text_height(font_small, art->description, text_w);
@@ -1009,6 +1221,7 @@ static int show_article_detail(int article_idx) {
 
         ap_present();
     }
+    if (hero_tex) SDL_DestroyTexture(hero_tex);
     return 0;
 }
 
