@@ -19,16 +19,17 @@ Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](ht
 ## Features
 
 - **RSS 2.0 and Atom** feed support
+- **Article hero images** -- automatically fetched and displayed in article detail view
 - **On-device feed management** -- add, edit, delete, and reorder feeds
 - **Offline reading** -- feeds cached locally, auto-refreshed when older than one hour
 - **WiFi detection** -- checks for WiFi before fetching with retry/continue options
 - **Refresh all feeds** from the menu
-- **Article detail view** with source domain, publish date, and scrollable description
+- **Article detail view** with source domain, publish date, hero image, and scrollable description
 - **On-screen keyboard** with URL shortcut buttons for easy feed entry
 - **Article count** shown next to each feed name
 - **Loading indicators** during feed fetches
 - **Refresh** individual feeds from the article list
-- **Reddit support** -- add any subreddit as a feed
+- **Reddit support** -- add any subreddit as a feed (images included)
 - **Persistent config** -- feeds saved to SD card
 - **HTTPS support** with bundled CA certificates
 - **Minimal UI** -- clean PakKit screens with subtle button hints
@@ -151,16 +152,17 @@ If you already cloned without --recursive:
 
 ### Build
 
-    make tg5040-docker
+    make build
 
 ### Package
 
-    cp build/tg5040/nextfeed ports/tg5040/pak/bin/nextfeed
-    chmod +x ports/tg5040/pak/bin/nextfeed
-    mkdir -p ports/tg5040/pak/lib
-    cp build/tg5040/lib/cacert.pem ports/tg5040/pak/lib/cacert.pem
+    make package
 
-Then copy ports/tg5040/pak/ to /Tools/tg5040/NextFeed.pak/ on your SD card.
+This builds the binary, stages all artifacts, and creates dist/NextFeed.tg5040.pak.zip.
+
+### Deploy
+
+Copy ports/tg5040/pak/ to /Tools/tg5040/NextFeed.pak/ on your SD card.
 
 ## Project Structure
 
@@ -187,7 +189,6 @@ Then copy ports/tg5040/pak/ to /Tools/tg5040/NextFeed.pak/ on your SD card.
     +-- scripts/
     |   +-- build_tg5040_docker.sh
     |   +-- package_pak.sh
-    |   +-- sync_feeds.py
     +-- third_party/
     |   +-- apostrophe/                # Git submodule
     |   +-- pakkit/                    # Git submodule
@@ -201,7 +202,8 @@ Then copy ports/tg5040/pak/ to /Tools/tg5040/NextFeed.pak/ on your SD card.
 | Path | Purpose |
 |------|---------|
 | /mnt/SDCARD/.userdata/tg5040/nextfeed/config/feeds.txt | User's feed list |
-| /mnt/SDCARD/.userdata/tg5040/nextfeed/cache/ | Cached feed XML |
+| /mnt/SDCARD/.userdata/tg5040/nextfeed/cache/*.xml | Cached feed XML |
+| /mnt/SDCARD/.userdata/tg5040/nextfeed/cache/img_* | Cached article images |
 | /mnt/SDCARD/.userdata/tg5040/logs/nextfeed.txt | Log file (current session only) |
 
 ## Tech Stack
