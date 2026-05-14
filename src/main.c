@@ -1119,6 +1119,7 @@ static int show_article_detail(int article_idx) {
 
     int running = 1;
     pakkit_scroll_state scroll = {0};
+    ap_set_input_repeat(150, 50);
 
     while (running) {
         ap_input_event ev;
@@ -1139,6 +1140,8 @@ static int show_article_detail(int article_idx) {
                 }
             }
         }
+
+        pakkit_scroll_animate(&scroll);
 
         ap_clear_screen();
         ap_draw_background();
@@ -1222,6 +1225,7 @@ static int show_article_detail(int article_idx) {
         ap_present();
     }
     if (hero_tex) SDL_DestroyTexture(hero_tex);
+    ap_set_input_repeat(AP_INPUT_REPEAT_DELAY, AP_INPUT_REPEAT_RATE);
     return 0;
 }
 

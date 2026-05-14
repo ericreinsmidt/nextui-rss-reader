@@ -34,6 +34,7 @@ all: $(BUILD_DIR)/nextfeed
 $(BUILD_DIR)/nextfeed: $(SRC) $(DEPS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	@cp $@ $(WORKSPACE)/ports/tg5040/pak/bin/nextfeed
 
 clean:
 	rm -rf $(BUILD_DIR)
