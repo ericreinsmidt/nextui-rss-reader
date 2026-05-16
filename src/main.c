@@ -1121,7 +1121,7 @@ static int show_article_detail(int article_idx) {
     pakkit_scroll_state scroll = {0};
     ap_set_input_repeat(150, 50);
 
-    while (running) {
+    while (running == 1) {
         ap_input_event ev;
         while (ap_poll_input(&ev)) {
             if (ev.pressed) {
@@ -1134,6 +1134,12 @@ static int show_article_detail(int article_idx) {
                         break;
                     case AP_BTN_DOWN:
                         pakkit_scroll_handle_input(&scroll, 1, PAKKIT_SCROLL_STEP);
+                        break;
+                    case AP_BTN_L1:
+                        if (!ev.repeated && article_idx > 0) { running = -1; }
+                        break;
+                    case AP_BTN_R1:
+                        if (!ev.repeated && article_idx < g_article_count - 1) { running = 2; }
                         break;
                     default:
                         break;
@@ -1217,16 +1223,35 @@ static int show_article_detail(int article_idx) {
         SDL_RenderSetClipRect(ap__g.renderer, NULL);
 
         /* Hints */
-        pakkit_hint hints[] = {
-            {.button = "B",.label = "Back" },
-        };
-        pakkit_draw_hints(hints, 1);
+        const char *nav_btn = NULL;
+        const char *nav_lbl = NULL;
+        if (article_idx > 0 && article_idx < g_article_count - 1) {
+            nav_btn = "L1/R1"; nav_lbl = "Prev/Next";
+        } else if (article_idx > 0) {
+            nav_btn = "L1"; nav_lbl = "Prev";
+        } else if (article_idx < g_article_count - 1) {
+            nav_btn = "R1"; nav_lbl = "Next";
+        }
+        if (nav_btn) {
+            pakkit_hint hints[] = {
+                {.button = "B",.label = "Back" },
+                {.button = nav_btn,.label = nav_lbl },
+            };
+            pakkit_draw_hints(hints, 2);
+        } else {
+            pakkit_hint hints[] = {
+                {.button = "B",.label = "Back" },
+            };
+            pakkit_draw_hints(hints, 1);
+        }
 
         ap_present();
     }
     if (hero_tex) SDL_DestroyTexture(hero_tex);
     ap_set_input_repeat(AP_INPUT_REPEAT_DELAY, AP_INPUT_REPEAT_RATE);
-    return 0;
+    if (running == -1) return -1;  /* prev article */
+    if (running == 2)  return  1;  /* next article */
+    return 0;                      /* back to list */
 }
 
 static int show_article_list(int feed_idx) {
@@ -1276,7 +1301,14 @@ static int show_article_list(int feed_idx) {
 
         if (result.selected_index >= 0) {
             last_index = result.selected_index;
-            show_article_detail(result.selected_index);
+            int idx = result.selected_index;
+            while (idx >= 0 && idx < g_article_count) {
+                int rc = show_article_detail(idx);
+                if (rc == -1) idx--;
+                else if (rc == 1) idx++;
+                else break;
+            }
+            last_index = idx >= 0 && idx < g_article_count ? idx : last_index;
         }
     }
 }

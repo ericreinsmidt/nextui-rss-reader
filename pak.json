@@ -1,6 +1,6 @@
 {
   "name": "NextFeed",
-  "version": "v1.2.0",
+  "version": "v1.3.0",
   "type": "TOOL",
   "description": "Offline-friendly RSS and Atom reader for NextUI devices.",
   "author": "Eric Reinsmidt",
@@ -15,7 +15,8 @@
     "v0.2.0": "Added caching of raw XML per feed, auto-refresh on launch, article count shown next to feed names, color picker and more.",
     "v0.1.0": "RSS 2.0 and Atom feed parsing, using Apostrophe for native NextUI look.",
     "v1.1.0": "Article hero images with fetch and cache, scroll bounce fix, standardized build system.",
-    "v1.2.0": "Smooth scrolling in article detail view."
+    "v1.2.0": "Smooth scrolling in article detail view.",
+    "v1.3.0": "Shoulder button navigation (L1/R1) to flip between articles."
   },
   "screenshots": [
     "assets/logo.png",

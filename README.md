@@ -24,7 +24,8 @@ Built with [PakKit](https://github.com/ericreinsmidt/pakkit) and [Apostrophe](ht
 - **Offline reading** -- feeds cached locally, auto-refreshed when older than one hour
 - **WiFi detection** -- checks for WiFi before fetching with retry/continue options
 - **Refresh all feeds** from the menu
-- **Article detail view** with source domain, publish date, hero image, and scrollable description
+- **Article detail view** with source domain, publish date, hero image, and smooth scrollable description
+- **Shoulder button navigation** -- L1/R1 to flip between articles without returning to the list
 - **On-screen keyboard** with URL shortcut buttons for easy feed entry
 - **Article count** shown next to each feed name
 - **Loading indicators** during feed fetches
@@ -104,6 +105,8 @@ You can add feeds from the feed list screen and edit or delete them from the men
 | Button | Action |
 |--------|--------|
 | Up/Down | Scroll |
+| L1 | Previous article |
+| R1 | Next article |
 | B | Back to articles |
 
 ### Keyboard
